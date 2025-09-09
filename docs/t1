@@ -1,0 +1,143 @@
+🏗️ Language Design Plan (Updated)
+
+Your language = fastest, safe by default, flexible when needed.
+Two modes:
+
+Strict Mode → strong typing, no silent conversions, null must be explicit (T?)
+
+Dynamic Mode → looser typing, variables can change type, null allowed freely
+
+1️⃣ Entry Point
+fn main() {
+    // program starts here
+}
+
+2️⃣ Variables & Types
+Declaration
+let a: int = 10      // strict type
+let b = "hello"      // inferred type
+var c = 20           // mutable variable
+
+
+let → immutable by default (safe, like Rust)
+
+var → mutable
+
+Type annotations optional if inference works
+
+Core Types
+
+int (64-bit signed by default)
+
+float (64-bit double precision)
+
+bool (true / false)
+
+string (UTF-8)
+
+null (only allowed via optional types in strict mode)
+
+T? (optional type → safe nullable)
+
+array<T>
+
+map<K, V>
+
+fn (functions as first-class values)
+
+struct (user-defined types)
+
+Null & Optionals
+let x: int? = null     // optional integer
+let y: string? = "hi"  
+
+if y != null {
+    print(y)           // safe use
+}
+print(y?)              // shorthand safe print
+
+
+Dynamic mode:
+
+let z = "hello"
+z = null   // allowed, becomes optional automatically
+
+3️⃣ Expressions
+
+Arithmetic: + - * / %
+
+Comparison: == != < > <= >=
+
+Boolean: && || !
+
+String concatenation: "hi" + " world"
+
+Array access: arr[0]
+
+Map access: map["key"]
+
+4️⃣ Statements & Control Flow
+If Expression
+let grade = if score > 90 { "A" } else { "B" }
+
+If Statement
+if a > 10 {
+    print("big")
+} else {
+    print("small")
+}
+
+While
+while i < 10 {
+    print(i)
+    i = i + 1
+}
+
+For (iterator-based)
+for x in [1,2,3] {
+    print(x)
+}
+
+Times (repeat N times)
+5 times {
+    print("Hello")
+}
+
+5️⃣ Functions
+Declaration
+fn add(a:int, b:int): int {
+    return a + b
+}
+
+First-class
+let f: fn(int)->int = add
+print(f(10))
+
+Optional Return
+fn findUser(id:int): User? {
+    if id == 0 { return null }
+    return User("ok")
+}
+
+6️⃣ Scope & Environment
+
+Block-scoped → {} introduces new scope
+
+Variables shadow outer ones safely
+
+Environment = stack of symbol tables
+
+Global
+
+Function scope
+
+Block scope
+
+7️⃣ Type System Modes
+Strict Mode
+let a: int = 10
+a = "hello"   // ❌ compile error
+
+Dynamic Mode
+let b = 10
+b = "hello"   // ✅ allowed, type changes

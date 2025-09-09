@@ -1,0 +1,25 @@
+# Build folder
+/build/
+/CMakeFiles/
+/CMakeCache.txt
+Makefile
+cmake_install.cmake
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Compiled binaries
+*.o
+*.a
+*.so
+*.exe
+zinc_exec
+codegen_tests
+lexer_tests
+parser_tests
+
+# Editor files
+*.swp
+*.vscode/
+.idea/
