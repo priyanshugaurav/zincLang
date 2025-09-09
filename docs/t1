@@ -9,7 +9,7 @@ Dynamic Mode → looser typing, variables can change type, null allowed freely
 
 1️⃣ Entry Point
 fn main() {
-    // program starts here
+    
 }
 
 2️⃣ Variables & Types

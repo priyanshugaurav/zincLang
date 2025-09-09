@@ -1,0 +1,6 @@
+let flag = true
+let other = false
+
+if (flag && !other) {
+    print("works")
+}
