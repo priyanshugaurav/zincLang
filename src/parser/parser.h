@@ -1,46 +1,73 @@
 #pragma once
 #include <vector>
 #include <memory>
-#include "../lexer/lexer.h"
-#include "../ast/ast.h"
+#include <string>
+#include "lexer/lexer.h"
+#include "ast/ast.h"
 
-class Parser {
-    const std::vector<Token> tokens;
-    size_t current;
-
-    Token peek() const;
-    Token previous() const;
-    Token advance();
-    bool isAtEnd() const;
-    bool check(TokenType t) const;
-    bool match(TokenType t);
-    void consume(TokenType t, const std::string &errMsg);
-
-    // expression parsing (precedence)
-    std::unique_ptr<Expr> expression();
-    std::unique_ptr<Expr> orExpr();
-    std::unique_ptr<Expr> andExpr();
-    std::unique_ptr<Expr> equality();
-    std::unique_ptr<Expr> comparison();
-    std::unique_ptr<Expr> term();
-    std::unique_ptr<Expr> factor();
-    std::unique_ptr<Expr> unary();
-    std::unique_ptr<Expr> call();
-    std::unique_ptr<Expr> primary();
-
-    // statements
-    std::unique_ptr<Stmt> declaration();
-    std::unique_ptr<Stmt> statement();
-    std::unique_ptr<Stmt> letDeclaration();
-    std::unique_ptr<Stmt> varDeclaration();
-    std::unique_ptr<BlockStmt> block();
-    std::unique_ptr<Stmt> ifStatement();
-    std::unique_ptr<Stmt> exprStatement();
-
+class Parser
+{
 public:
-    Parser(const std::vector<Token> &toks);
-    std::vector<std::unique_ptr<Stmt>> parse();
+    Parser(const std::vector<Token> &tokens);
+    StmtPtr parse();
+    // Entry point: parse the whole program
+    std::vector<StmtPtr> parseProgram();
 
-    // debug helper: print AST
-    static void printAST(const std::vector<std::unique_ptr<Stmt>> &program, int indent = 0);
+private:
+    const std::vector<Token> &tokens;
+    size_t current = 0;
+
+    // -------------------
+    // Helpers
+    // -------------------
+    const Token &peek() const;
+    const Token &previous() const;
+    bool match(const std::vector<TokenType> &types);
+    bool check(TokenType type) const;
+    const Token &advance();
+    bool isAtEnd() const;
+    void consume(TokenType type, const std::string &msg);
+    const Token &peekNext() const;
+
+    // -------------------
+    // Parsing rules
+    // -------------------
+    StmtPtr declaration();
+    StmtPtr varDeclaration();
+    StmtPtr statement();
+    StmtPtr ifStatement();
+    StmtPtr whileStatement();
+    StmtPtr forStatement();
+    StmtPtr timesStatement();
+    StmtPtr returnStatement();
+    StmtPtr expressionStatement();
+    StmtPtr functionDeclaration();
+    StmtPtr blockStatement();                // consumes '{'
+    StmtPtr blockStatementAlreadyConsumed(); // assumes '{' already consumed
+    StmtPtr finishBlock();
+
+    ExprPtr expression();
+    ExprPtr assignment();
+    ExprPtr blockExpression();
+    ExprPtr logicalOr();
+    ExprPtr logicalAnd();
+    ExprPtr equality();
+    ExprPtr comparison();
+    ExprPtr term();
+    ExprPtr factor();
+    ExprPtr unary();
+    ExprPtr call();
+    ExprPtr primary();
+    ExprPtr arrayLiteral();
+
+    std::string parseType();
+    ExprPtr ifExpression();
+
+    ExprPtr finishCall(ExprPtr callee);
+    ExprPtr indexExpr(ExprPtr array);
+
+    // -------------------
+    // Utilities
+    // -------------------
+    void synchronize();
 };

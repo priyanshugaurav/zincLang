@@ -2,76 +2,176 @@
 #include <string>
 #include <vector>
 #include <memory>
-#include "../lexer/lexer.h"
 
-// === AST ===
-// Base classes
-struct Expr {
-    virtual ~Expr() = default;
+// Forward declaration
+struct ASTNode;
+struct Statement;
+struct Expression;
+
+// Smart pointer type aliases
+using ASTNodePtr = std::shared_ptr<ASTNode>;
+using StmtPtr = std::shared_ptr<Statement>;
+using ExprPtr = std::shared_ptr<Expression>;
+
+// ---------------------------
+// Base AST Node
+// ---------------------------
+struct ASTNode {
+    virtual ~ASTNode() = default;
 };
 
-struct Stmt {
-    virtual ~Stmt() = default;
+// ---------------------------
+// Expressions
+// ---------------------------
+struct Expression : ASTNode {};
+
+// Literal expressions: int, float, bool, string
+struct LiteralExpr : Expression {
+    std::string value; // store raw lexeme for now
+    LiteralExpr(const std::string &val) : value(val) {}
 };
 
-// ----- Expressions -----
-struct LiteralExpr : Expr {
-    Token token; // holds type/value (INT, FLOAT, STRING, BOOL)
-    LiteralExpr(const Token &t) : token(t) {}
-};
-
-struct VariableExpr : Expr {
+// Identifier expression
+struct IdentifierExpr : Expression {
     std::string name;
-    VariableExpr(const std::string &n) : name(n) {}
+    IdentifierExpr(const std::string &n) : name(n) {}
 };
 
-struct UnaryExpr : Expr {
-    Token op;
-    std::unique_ptr<Expr> right;
-    UnaryExpr(const Token &o, std::unique_ptr<Expr> r)
-        : op(o), right(std::move(r)) {}
+// Unary expression: !, -
+struct UnaryExpr : Expression {
+    std::string op;   // operator
+    ExprPtr rhs;
+    UnaryExpr(const std::string &o, ExprPtr r) : op(o), rhs(r) {}
 };
 
-struct BinaryExpr : Expr {
-    std::unique_ptr<Expr> left;
-    Token op;
-    std::unique_ptr<Expr> right;
-    BinaryExpr(std::unique_ptr<Expr> l, const Token &o, std::unique_ptr<Expr> r)
-        : left(std::move(l)), op(o), right(std::move(r)) {}
+// Binary expression: +, -, *, /, %, &&, ||, <, <=, >, >=, ==, !=
+struct BinaryExpr : Expression {
+    ExprPtr lhs;
+    std::string op;
+    ExprPtr rhs;
+    BinaryExpr(ExprPtr l, const std::string &o, ExprPtr r) : lhs(l), op(o), rhs(r) {}
 };
 
-struct CallExpr : Expr {
-    std::string callee;
-    std::vector<std::unique_ptr<Expr>> args;
-    CallExpr(const std::string &c) : callee(c) {}
+// Function call: foo(a, b)
+struct CallExpr : Expression {
+    ExprPtr callee;                // IdentifierExpr usually
+    std::vector<ExprPtr> args;
+    CallExpr(ExprPtr c, std::vector<ExprPtr> a) : callee(c), args(std::move(a)) {}
 };
 
-// ----- Statements -----
-struct ExprStmt : Stmt {
-    std::unique_ptr<Expr> expr;
-    ExprStmt(std::unique_ptr<Expr> e) : expr(std::move(e)) {}
+// Array literal: [1,2,3]
+struct ArrayExpr : Expression {
+    std::vector<ExprPtr> elements;
+    ArrayExpr(std::vector<ExprPtr> elems) : elements(std::move(elems)) {}
 };
 
-struct LetStmt : Stmt {
+
+
+// Index expression: arr[0]
+struct IndexExpr : Expression {
+    ExprPtr array;
+    ExprPtr index;
+    IndexExpr(ExprPtr arr, ExprPtr idx) : array(arr), index(idx) {}
+};
+
+// ---------------------------
+// Statements
+// ---------------------------
+struct Statement : ASTNode {};
+
+// Variable declaration: let/var x = expr
+struct VarDecl : Statement {
+    bool isMutable; // true if var, false if let
     std::string name;
-    std::unique_ptr<Expr> init; // may be null
-    LetStmt(const std::string &n, std::unique_ptr<Expr> i)
-        : name(n), init(std::move(i)) {}
+    std::string typeHint; // optional type
+    ExprPtr initializer;
+    VarDecl(bool mut, const std::string &n, ExprPtr init, const std::string &t = "")
+    : isMutable(mut), name(n), typeHint(t), initializer(init) {}
 };
 
-struct VarStmt : Stmt {
+// Expression statement: expr;
+struct ExprStmt : Statement {
+    ExprPtr expr;
+    ExprStmt(ExprPtr e) : expr(e) {}
+};
+
+// Return statement
+struct ReturnStmt : Statement {
+    ExprPtr value; // can be nullptr for void
+    ReturnStmt(ExprPtr v) : value(v) {}
+};
+
+// Block: { stmt1; stmt2; ... }
+struct BlockStmt : Statement {
+    std::vector<StmtPtr> statements;
+    BlockStmt(std::vector<StmtPtr> stmts) : statements(std::move(stmts)) {}
+};
+
+// If statement: if (cond) { ... } else { ... }
+struct IfStmt : Statement {
+    ExprPtr condition;
+    StmtPtr thenBranch;
+    StmtPtr elseBranch; // optional
+    IfStmt(ExprPtr cond, StmtPtr thenB, StmtPtr elseB = nullptr)
+        : condition(cond), thenBranch(thenB), elseBranch(elseB) {}
+};
+
+struct IfExpr : public Expression {
+    ExprPtr condition;
+    ExprPtr thenBranch;
+    ExprPtr elseBranch;
+
+    IfExpr(ExprPtr cond, ExprPtr thenB, ExprPtr elseB)
+        : condition(cond), thenBranch(thenB), elseBranch(elseB) {}
+};
+
+
+struct ArrayAssignExpr : Expression {
+    ExprPtr array;
+    ExprPtr index;
+    ExprPtr value;
+
+    ArrayAssignExpr(ExprPtr arr, ExprPtr idx, ExprPtr val)
+        : array(arr), index(idx), value(val) {}
+};
+
+
+// While loop
+struct WhileStmt : Statement {
+    ExprPtr condition;
+    StmtPtr body;
+    WhileStmt(ExprPtr cond, StmtPtr b) : condition(cond), body(b) {}
+};
+
+
+
+// For loop: for x in array { ... }
+struct ForStmt : Statement {
+    std::string iterator;
+    ExprPtr iterable;
+    StmtPtr body;
+    ForStmt(const std::string &it, ExprPtr iter, StmtPtr b)
+        : iterator(it), iterable(iter), body(b) {}
+};
+
+
+
+// Times loop: 5 times { ... }
+struct TimesStmt : Statement {
+    ExprPtr count;
+    StmtPtr body;
+    TimesStmt(ExprPtr c, StmtPtr b) : count(c), body(b) {}
+};
+
+// Function declaration: fn foo(a:int, b:int): int { ... }
+struct FuncDecl : Statement {
     std::string name;
-    std::unique_ptr<Expr> init; // may be null
-    VarStmt(const std::string &n, std::unique_ptr<Expr> i)
-        : name(n), init(std::move(i)) {}
-};
-
-struct BlockStmt : Stmt {
-    std::vector<std::unique_ptr<Stmt>> statements;
-};
-
-struct IfStmt : Stmt {
-    std::unique_ptr<Expr> condition;
-    std::unique_ptr<BlockStmt> thenBranch;
-    std::unique_ptr<Stmt> elseBranch; // can be BlockStmt or IfStmt
+    std::vector<std::pair<std::string, std::string>> params; // name + type
+    std::string returnType; // optional
+    StmtPtr body;           // usually BlockStmt
+    FuncDecl(const std::string &n,
+         std::vector<std::pair<std::string, std::string>> p,
+         StmtPtr b,
+         const std::string &ret = "")
+    : name(n), params(std::move(p)), returnType(ret), body(b) {}
 };

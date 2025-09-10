@@ -1,0 +1,141 @@
+📘 Zinc Language Specification – Version 1 (MVP)
+1. 🎯 Design Philosophy
+
+Simple: clean syntax, easy to read.
+
+Safe by default: immutability, strict typing.
+
+Practical: arrays, loops, and conditionals out of the box.
+
+Future-ready: extensible for structs, maps, classes later.
+
+Version 1 stops at:
+✅ Variables & Arrays
+✅ Conditionals
+✅ Loops
+✅ Functions
+
+2. 🏁 Program Structure
+
+Every program must define a main function:
+
+fn main() {
+    print("Hello, Zinc!")
+}
+
+
+Execution always starts from main.
+
+3. 🔢 Variables & Types
+Declaration
+let a: int = 10      // immutable, explicit type
+let b = 20           // immutable, inferred type
+var c = 30           // mutable variable
+
+
+let → immutable (default, safe).
+
+var → mutable.
+
+Type annotation optional if inference works.
+
+Supported Types
+
+int (64-bit signed integer)
+
+float (64-bit double precision)
+
+bool (true / false)
+
+string (UTF-8)
+
+array<T> (dynamic arrays, homogenous elements)
+
+Examples
+let x: int = 42
+var y = 3.14
+let msg = "Hello"
+let nums: array<int> = [1, 2, 3, 4]
+
+4. 🧮 Expressions
+
+Arithmetic: + - * / %
+
+Comparison: == != < > <= >=
+
+Boolean: && || !
+
+String concatenation: "Hi" + " there"
+
+5. 🔀 Conditionals
+If Statement
+if x > 10 {
+    print("big")
+} else {
+    print("small")
+}
+
+If Expression
+let grade = if score > 90 { "A" } else { "B" }
+
+6. 🔁 Loops
+While
+var i = 0
+while i < 5 {
+    print(i)
+    i = i + 1
+}
+
+For (array iteration)
+for n in [1,2,3,4] {
+    print(n)
+}
+
+Times (repeat N times)
+times 5 {
+    print("Hello")
+}
+times(5){
+    print("Hello")
+}
+
+7. 🧩 Functions
+Declaration
+fn add(a: int, b: int): int {
+    return a + b
+}
+
+Calling
+let result = add(5, 7)
+print(result)
+
+
+8. 📦 Arrays
+Declaration
+let nums = [1, 2, 3]
+var names: array<string> = ["a", "b", "c"]
+
+Access
+print(nums[0])   // prints 1
+
+Mutation
+var nums = [1, 2, 3]
+nums[1] = 42
+print(nums[1])   // prints 42
+
+9. 📐 Scope
+
+New block {} creates scope.
+
+Variables shadow outer ones.
+
+Example:
+
+fn main() {
+    let x = 10
+    {
+        let x = 20
+        print(x)   // 20
+    }
+    print(x)       // 10
+}

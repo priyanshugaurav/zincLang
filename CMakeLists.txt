@@ -18,6 +18,7 @@ add_library(zincLib
     src/lexer/lexer.cpp
     src/parser/parser.cpp
     src/codegen/codegen.cpp
+    src/sema/semantic.cpp
     # Add other core files here (AST, sema, utils)
 )
 

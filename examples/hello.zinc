@@ -1,3 +1,125 @@
-let a = 10
-var b = 20.5
-let c = "Hello, Zinc!"
+fn factorial(n: int): int {
+    if n <= 1 {
+        return 1
+    } else {
+        return n * factorial(n - 1)
+    }
+}
+
+fn sumArray(arr: array<int>): int {
+    var total = 0
+    for x in arr {
+        total = total + x
+    }
+    return total
+}
+
+fn grade(score: int): string {
+    return if score >= 90 { "A" } else { "B" }
+}
+
+fn main() {
+    // -------------------
+    // Variables & Shadowing
+    // -------------------
+    let x: int = 10
+    var y = 20
+    print("Outer x =", x)
+    print("Outer y =", y)
+    {
+        let x = 99
+        var y = 50
+        print("Inner x =", x)
+        print("Inner y =", y)
+        y = y + 5
+        print("Inner y after increment =", y)
+    }
+    print("Outer x after block =", x)
+    print("Outer y after block =", y)
+
+    // -------------------
+    // Arrays & Mutation
+    // -------------------
+    var nums: array<int> = [1,2,3,4,5]
+    nums[0] = 42
+    nums[4] = nums[0] + 10
+    print("Array after mutation =", nums)
+
+    // -------------------
+    // Loops: while, for, times
+    // -------------------
+    var i = 0
+    while i < 3 {
+        print("While loop i =", i)
+        i = i + 1
+    }
+
+    for n in nums {
+        print("For loop n =", n)
+    }
+
+    times 2 {
+        print("Times loop iteration")
+    }
+
+    // -------------------
+    // Functions & Recursion
+    // -------------------
+    let f5 = factorial(5)
+    print("Factorial of 5 =", f5)
+    let total = sumArray(nums)
+    print("Sum of nums =", total)
+
+    // -------------------
+    // Conditionals & If Expressions
+    // -------------------
+    var score = 85
+    var myGrade = grade(score)
+    print("My grade =", myGrade)
+
+    let g = if x > 5 { "Pass" } else { "Fail" }
+    print("Result =", g)
+
+    // -------------------
+    // Nested Blocks & Shadowing
+    // -------------------
+    let outer = "Outer"
+    {
+        let outer = "Inner"
+        print("Shadowed outer =", outer)
+    }
+    print("Original outer =", outer)
+
+    // -------------------
+    // Complex Expressions
+    // -------------------
+    var a = 5
+    var b = 10
+    a = a + b * 2 - 3
+    b = b / 2 + a % 3
+    print("a =", a, "b =", b)
+    
+    let msg = "Hello " + "Zinc"
+    print(msg)
+
+    // -------------------
+    // Nested Arrays & Loops
+    // -------------------
+    var matrix: array<array<int> > = [[1,2],[3,4]]
+    matrix[0][1] = 9
+    for row in matrix {
+        for val in row {
+            print("Matrix val =", val)
+        }
+    }
+
+    // -------------------
+    // Boolean Expressions
+    // -------------------
+    let flag = true
+    if flag && (a > b) || !(b > 5) {
+        print("Boolean check passed")
+    } else {
+        print("Boolean check failed")
+    }
+}

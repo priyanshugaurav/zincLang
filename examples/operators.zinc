@@ -1,6 +1,4 @@
-let flag = true
-let other = false
-
-if (flag && !other) {
-    print("works")
+while i < 10 {
+    print(i)
+    i = i + 1
 }

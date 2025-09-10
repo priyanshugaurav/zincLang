@@ -1,260 +1,271 @@
 #include "lexer.h"
+#include <string>
+#include <vector>
+#include <unordered_map>
+#include <cctype>
+#include <stdexcept>
 
-Lexer::Lexer(const std::string &src) : source(src), pos(0), line(1) {}
+class Lexer {
+    std::string src;
+    size_t pos = 0;
+    int line = 1;
+    int col = 1;
 
-bool Lexer::isAtEnd() const {
-    return pos >= source.size();
-}
+    std::unordered_map<std::string, TokenType> keywords = {
+        {"let", TokenType::Let},
+        {"var", TokenType::Var},
+        {"fn", TokenType::Fn},
+        {"if", TokenType::If},
+        {"else", TokenType::Else},
+        {"while", TokenType::While},
+        {"return", TokenType::Return},
+        {"for", TokenType::For},
+        {"in", TokenType::In},
+        {"times", TokenType::Times},
+        {"true", TokenType::True},
+        {"false", TokenType::False},
+    };
 
-char Lexer::currentChar() const {
-    if (isAtEnd()) return '\0';
-    return source[pos];
-}
+    char peek() const { return pos < src.size() ? src[pos] : '\0'; }
+    char peekNext() const { return (pos + 1) < src.size() ? src[pos + 1] : '\0'; }
 
+    char advance() {
+        char c = peek();
+        if (c == '\0') return c;
+        if (c == '\n') {
+            line++;
+            col = 1;
+        } else {
+            col++;
+        }
+        pos++;
+        return c;
+    }
 
-void Lexer::advance()
-{
-    if (currentChar() == '\n')
-        line++;
-    pos++;
-}
-
-void Lexer::skipWhitespace()
-{
-    while (isspace(currentChar()))
-        advance();
-}
-
-bool Lexer::isKeyword(const std::string &str, TokenType &type)
-{
-    if (str == "let")
-        type = TokenType::LET;
-    else if (str == "var")
-        type = TokenType::VAR;
-    else if (str == "fn")
-        type = TokenType::FN;
-    else if (str == "if")
-        type = TokenType::IF;
-    else if (str == "else")
-        type = TokenType::ELSE;
-    else if (str == "while")
-        type = TokenType::WHILE;
-    else if (str == "for")
-        type = TokenType::FOR;
-    else if (str == "times")
-        type = TokenType::TIMES;
-    else if (str == "return")
-        type = TokenType::RETURN;
-    else if (str == "null")
-        type = TokenType::NULLVAL;
-    else
+    bool match(char expected) {
+        if (peek() == expected) {
+            advance();
+            return true;
+        }
         return false;
-    return true;
-}
-
-Token Lexer::number()
-{
-    std::string result;
-    bool hasDot = false;
-    while (isdigit(currentChar()) || currentChar() == '.')
-    {
-        if (currentChar() == '.')
-        {
-            if (hasDot)
-                break;
-            hasDot = true;
-        }
-        result += currentChar();
-        advance();
-    }
-    return hasDot ? Token(TokenType::FLOAT, result, line)
-                  : Token(TokenType::INT, result, line);
-}
-
-Token Lexer::identifier()
-{
-    std::string result;
-    while (isalnum(currentChar()) || currentChar() == '_')
-    {
-        result += currentChar();
-        advance();
-    }
-    TokenType type;
-    if (isKeyword(result, type))
-        return Token(type, result, line);
-    return Token(TokenType::IDENTIFIER, result, line);
-}
-
-Token Lexer::stringLiteral()
-{
-    advance(); // consume opening "
-
-    size_t start = pos;
-    while (!isAtEnd() && currentChar() != '"')
-    {
-        advance();
-    }
-    if (isAtEnd())
-    {
-        throw std::runtime_error("Unterminated string literal");
     }
 
-    std::string value = source.substr(start, pos - start);
-    advance(); // consume closing "
-
-    return Token(TokenType::STRING, value, line);
-}
-
-Token Lexer::nextToken()
-{
-    skipWhitespace();
-
-    char ch = currentChar();
-    if (ch == '\0')
-        return Token(TokenType::END_OF_FILE, "", line);
-
-    // Numbers
-    if (isdigit(ch))
-        return number();
-
-    // Identifiers / keywords / booleans
-    if (isalpha(ch) || ch == '_')
-    {
-        Token t = identifier();
-        if (t.value == "true" || t.value == "false")
-        {
-            return Token(TokenType::BOOL, t.value, line);
-        }
-        return t;
-    }
-
-    // Strings
-    if (ch == '"')
-        return stringLiteral();
-
-    // Comments
-    if (ch == '/')
-    {
-        if (pos + 1 < source.size() && source[pos + 1] == '/')
-        {
-            while (currentChar() != '\n' && currentChar() != '\0')
+    void skipWhitespaceAndComments() {
+        while (true) {
+            char c = peek();
+            // whitespace
+            if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
                 advance();
-            return nextToken();
+                continue;
+            }
+
+            // single-line comment //
+            if (c == '/' && peekNext() == '/') {
+                advance(); // '/'
+                advance(); // '/'
+                while (peek() != '\n' && peek() != '\0') advance();
+                continue;
+            }
+
+            // block comment /* ... */
+            if (c == '/' && peekNext() == '*') {
+                advance(); // '/'
+                advance(); // '*'
+                while (!(peek() == '*' && peekNext() == '/')) {
+                    if (peek() == '\0') {
+                        throw std::runtime_error("Unterminated block comment at line " + std::to_string(line));
+                    }
+                    advance();
+                }
+                advance(); // '*'
+                advance(); // '/'
+                continue;
+            }
+
+            break;
         }
-        if (pos + 1 < source.size() && source[pos + 1] == '*')
-        {
-            advance(); // /
-            advance(); // *
-            while (!(currentChar() == '*' && pos + 1 < source.size() && source[pos + 1] == '/'))
-            {
-                if (currentChar() == '\0')
-                    throw std::runtime_error("Unterminated block comment");
+    }
+
+    Token makeToken(TokenType t, const std::string &val = "") const {
+        return Token{t, val, line, col};
+    }
+
+    Token identifier() {
+        size_t start = pos;
+        int startCol = col;
+        while (std::isalnum(static_cast<unsigned char>(peek())) || peek() == '_') advance();
+        std::string txt = src.substr(start, pos - start);
+        auto it = keywords.find(txt);
+        if (it != keywords.end()) {
+            return Token{it->second, txt, line, startCol};
+        }
+        return Token{TokenType::Identifier, txt, line, startCol};
+    }
+
+    Token number() {
+        size_t start = pos;
+        int startCol = col;
+        // integer part
+        while (std::isdigit(static_cast<unsigned char>(peek()))) advance();
+
+        // optional fractional part
+        if (peek() == '.' && std::isdigit(static_cast<unsigned char>(peekNext()))) {
+            advance(); // consume '.'
+            while (std::isdigit(static_cast<unsigned char>(peek()))) advance();
+        }
+
+        std::string txt = src.substr(start, pos - start);
+        return Token{TokenType::Number, txt, line, startCol};
+    }
+
+    Token stringLiteral() {
+        // opening " already consumed by caller
+        size_t start = pos;
+        int startCol = col;
+        std::string out;
+        while (peek() != '"' && peek() != '\0') {
+            if (peek() == '\\') {
+                advance(); // consume '\'
+                char esc = peek();
+                if (esc == '\0') break;
+                // handle common escapes
+                switch (esc) {
+                    case 'n': out.push_back('\n'); break;
+                    case 'r': out.push_back('\r'); break;
+                    case 't': out.push_back('\t'); break;
+                    case '\\': out.push_back('\\'); break;
+                    case '"': out.push_back('"'); break;
+                    default:
+                        // keep unknown escape as-is (e.g. \x)
+                        out.push_back(esc);
+                        break;
+                }
+                advance(); // consume escaped char
+            } else {
+                out.push_back(peek());
                 advance();
             }
-            advance(); // *
-            advance(); // /
-            return nextToken();
         }
+        if (peek() != '"') {
+            throw std::runtime_error("Unterminated string literal at line " + std::to_string(line));
+        }
+        advance(); // consume closing "
+        return Token{TokenType::String, out, line, startCol};
     }
 
-    // Operators & symbols
-    switch (ch)
-    {
-    case '+':
-        advance();
-        return Token(TokenType::PLUS, "+", line);
-    case '-':
-        advance();
-        return Token(TokenType::MINUS, "-", line);
-    case '*':
-        advance();
-        return Token(TokenType::STAR, "*", line);
-    case '/':
-        advance();
-        return Token(TokenType::SLASH, "/", line);
-    case '%':
-        advance();
-        return Token(TokenType::PERCENT, "%", line);
+public:
+    Lexer(const std::string &s) : src(s), pos(0), line(1), col(1) {}
 
-    case '(':
-        advance();
-        return Token(TokenType::LPAREN, "(", line);
-    case ')':
-        advance();
-        return Token(TokenType::RPAREN, ")", line);
-    case '{':
-        advance();
-        return Token(TokenType::LBRACE, "{", line);
-    case '}':
-        advance();
-        return Token(TokenType::RBRACE, "}", line);
-    case '[':
-        advance();
-        return Token(TokenType::LBRACKET, "[", line);
-    case ']':
-        advance();
-        return Token(TokenType::RBRACKET, "]", line);
-    case ',':
-        advance();
-        return Token(TokenType::COMMA, ",", line);
-    case ';':
-        advance();
-        return Token(TokenType::SEMICOLON, ";", line);
+    std::vector<Token> tokenize() {
+        std::vector<Token> out;
+        while (true) {
+            skipWhitespaceAndComments();
+            char c = peek();
+            if (c == '\0') {
+                out.push_back(makeToken(TokenType::Eof, ""));
+                break;
+            }
 
-    case '=':
-        advance();
-        if (currentChar() == '=')
-        {
-            advance();
-            return Token(TokenType::EQ, "==", line);
+            // identifiers / keywords
+            if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
+                // start identifier
+                // don't advance here; identifier() expects to start at current pos
+                out.push_back(identifier());
+                continue;
+            }
+
+            // numbers
+            if (std::isdigit(static_cast<unsigned char>(c))) {
+                out.push_back(number());
+                continue;
+            }
+
+            // punctuation, operators, strings
+            switch (c) {
+                case '(':
+                    advance(); out.push_back(makeToken(TokenType::LParen, "(")); break;
+                case ')':
+                    advance(); out.push_back(makeToken(TokenType::RParen, ")")); break;
+                case '{':
+                    advance(); out.push_back(makeToken(TokenType::LBrace, "{")); break;
+                case '}':
+                    advance(); out.push_back(makeToken(TokenType::RBrace, "}")); break;
+                case '[':
+                    advance(); out.push_back(makeToken(TokenType::LBracket, "[")); break;
+                case ']':
+                    advance(); out.push_back(makeToken(TokenType::RBracket, "]")); break;
+                case ':':
+                    advance(); out.push_back(makeToken(TokenType::Colon, ":")); break;
+                case ';':
+                    advance(); out.push_back(makeToken(TokenType::Semicolon, ";")); break;
+                case ',':
+                    advance(); out.push_back(makeToken(TokenType::Comma, ",")); break;
+                case '+':
+                    advance(); out.push_back(makeToken(TokenType::Plus, "+")); break;
+                case '-':
+                    advance(); out.push_back(makeToken(TokenType::Minus, "-")); break;
+                case '*':
+                    advance(); out.push_back(makeToken(TokenType::Star, "*")); break;
+                case '/':
+                    // could be comment handled earlier; here it's division
+                    advance(); out.push_back(makeToken(TokenType::Slash, "/")); break;
+                case '%':
+                    advance(); out.push_back(makeToken(TokenType::MOD, "%")); break;
+                case '!': {
+                    advance();
+                    if (match('=')) out.push_back(makeToken(TokenType::NotEqual, "!="));
+                    else out.push_back(makeToken(TokenType::Bang, "!"));
+                    break;
+                }
+                case '=': {
+                    advance();
+                    if (match('=')) out.push_back(makeToken(TokenType::Equal, "=="));
+                    else out.push_back(makeToken(TokenType::Assign, "="));
+                    break;
+                }
+                case '&': {
+                    advance();
+                    if (match('&')) out.push_back(makeToken(TokenType::AndAnd, "&&"));
+                    else out.push_back(makeToken(TokenType::BitAnd, "&"));
+                    break;
+                }
+                case '|': {
+                    advance();
+                    if (match('|')) out.push_back(makeToken(TokenType::OrOr, "||"));
+                    else out.push_back(makeToken(TokenType::BitOr, "|"));
+                    break;
+                }
+                case '^':
+                    advance(); out.push_back(makeToken(TokenType::BitXor, "^")); break;
+                case '<': {
+                    advance();
+                    if (match('<')) out.push_back(makeToken(TokenType::ShiftLeft, "<<"));
+                    else if (match('=')) out.push_back(makeToken(TokenType::LessEqual, "<="));
+                    else out.push_back(makeToken(TokenType::Less, "<"));
+                    break;
+                }
+                case '>': {
+                    advance();
+                    if (match('>')) out.push_back(makeToken(TokenType::ShiftRight, ">>"));
+                    else if (match('=')) out.push_back(makeToken(TokenType::GreaterEqual, ">="));
+                    else out.push_back(makeToken(TokenType::Greater, ">"));
+                    break;
+                }
+                case '"': {
+                    advance(); // consume opening "
+                    out.push_back(stringLiteral());
+                    break;
+                }
+                default:
+                    throw std::runtime_error(std::string("Unexpected character in input: '") + c + "' at line " + std::to_string(line));
+            }
         }
-        return Token(TokenType::ASSIGN, "=", line);
-
-    case '!':
-        advance();
-        if (currentChar() == '=')
-        {
-            advance();
-            return Token(TokenType::NEQ, "!=", line);
-        }
-        return Token(TokenType::NOT, "!", line);
-
-    case '<':
-        advance();
-        if (currentChar() == '=')
-        {
-            advance();
-            return Token(TokenType::LTE, "<=", line);
-        }
-        return Token(TokenType::LT, "<", line);
-
-    case '>':
-        advance();
-        if (currentChar() == '=')
-        {
-            advance();
-            return Token(TokenType::GTE, ">=", line);
-        }
-        return Token(TokenType::GT, ">", line);
-
-    case '&':
-        if (pos + 1 < source.size() && source[pos + 1] == '&')
-        {
-            advance();
-            advance();
-            return Token(TokenType::AND, "&&", line);
-        }
-        break;
-
-    case '|':
-        if (pos + 1 < source.size() && source[pos + 1] == '|')
-        {
-            advance();
-            advance();
-            return Token(TokenType::OR, "||", line);
-        }
-        break;
+        return out;
     }
+};
 
-    throw std::runtime_error("Unknown character at line " + std::to_string(line) + ": " + ch);
+// Convenience helper used by the rest of the project
+std::vector<Token> lexString(const std::string &s) {
+    Lexer lx(s);
+    return lx.tokenize();
 }

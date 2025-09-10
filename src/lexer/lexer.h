@@ -1,89 +1,55 @@
 #pragma once
 #include <string>
 #include <vector>
-#include <cctype>
-#include <stdexcept>
 
-enum class TokenType
-{
-    // Single-character tokens
-    PLUS,
-    MINUS,
-    STAR,
-    SLASH,
-    PERCENT,
-    LPAREN,
-    RPAREN,
-    LBRACE,
-    RBRACE,
-    LBRACKET,
-    RBRACKET,
-    COMMA,
-    SEMICOLON,
-    ASSIGN,
-
-    // Comparison
-    EQ,
-    NEQ,
-    LT,
-    GT,
-    LTE,
-    GTE,
-
-    // Logical
-    AND,
-    OR,
-    NOT,
+enum class TokenType {
+    // Special
+    Eof,
 
     // Literals
-    INT,
-    FLOAT,
-    STRING,
-    BOOL,
-    IDENTIFIER,
+    Identifier,
+    Number,     // integer or float (lexed as text)
+    String,
 
     // Keywords
-    LET,
-    VAR,
-    FN,
-    IF,
-    ELSE,
-    WHILE,
-    FOR,
-    TIMES,
-    RETURN,
-    NULLVAL,
+    Let,
+    Var,
+    Fn,
+    If,
+    Else,
+    Then,
+    While,
+    Return,
+    For,
+    In,
+    Times,
+    True,
+    False,
 
-    END_OF_FILE,
+    // Punctuation
+    LParen, RParen,
+    LBrace, RBrace,
+    LBracket, RBracket,
+    Colon, Semicolon, Comma,
+
+    // Operators
+    Plus, Minus, Star, Slash, MOD,
+    Bang, NotEqual,
+    Assign, Equal,
+    AndAnd, OrOr,
+    BitAnd, BitOr, BitXor,
+    ShiftLeft, ShiftRight,
+    Less, LessEqual, Greater, GreaterEqual,
+
+    // Other
+    Unknown
 };
 
-struct Token
-{
+struct Token {
     TokenType type;
-    std::string value;
-    int line;
-
-    Token(TokenType t, const std::string &val, int ln)
-        : type(t), value(val), line(ln) {}
+    std::string value; // the raw lexeme (if applicable)
+    int line = 0;
+    int col = 0;
 };
 
-class Lexer
-{
-private:
-    std::string source;
-    size_t pos;
-    int line;
-    bool isAtEnd() const;
-    char currentChar() const;
-
-    void advance();
-    void skipWhitespace();
-    Token number();
-    Token identifier();
-    Token stringLiteral();
-    bool isKeyword(const std::string &str, TokenType &type);
-
-public:
-    Lexer(const std::string &src);
-    Token nextToken();
-};
+std::vector<Token> lexString(const std::string &src);
