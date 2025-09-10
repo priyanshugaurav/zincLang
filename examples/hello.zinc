@@ -1,5 +1,8 @@
 fn main() {
-    let arr = [1,2,3];
-let x = arr[5]; // COMPILE-TIME ERROR
 
+    var a = 10.2
+    let arr: array<array<int> > = [[1,2],[2,3]];
+    arr[1][5]
+    // arr[1] = "hello";   // should ERROR
+    //arr[0] = 1.5;         // should ERROR if strict int array
 }

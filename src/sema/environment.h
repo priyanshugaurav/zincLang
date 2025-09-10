@@ -8,20 +8,19 @@
 // ----------------------------
 // Symbol Information
 // ----------------------------
-struct Symbol
-{
+struct Symbol {
     std::string name;
-    std::string type;
-    std::string value;
+    std::string type;   // e.g., "array<int>"
+    std::string value;  // optional
+    int arraySize = -1; // -1 = unknown
     bool isMutable;
 
-    // Default constructor
-    Symbol() : name(""), type(""), isMutable(false) {}
+    Symbol() : name(""), type(""), arraySize(-1), isMutable(false) {}
+Symbol(const std::string &n, const std::string &t, bool mut, int arrSize = -1)
+    : name(n), type(t), arraySize(arrSize), isMutable(mut) {}
 
-    // Existing constructor
-    Symbol(const std::string &n, const std::string &t, bool mut)
-        : name(n), type(t), isMutable(mut) {}
 };
+
 
 struct FunctionType {
     std::vector<std::string> paramTypes;
@@ -39,7 +38,8 @@ public:
     explicit Environment(std::shared_ptr<Environment> parent = nullptr);
 
     // Add a symbol to current scope
-    bool define(const std::string &name, const std::string &type, bool isMutable);
+    // Overload to define array with size
+bool define(const std::string &name, const std::string &type, bool isMutable, int arraySize = -1);
 
     bool defineFunction(const std::string &name, const FunctionType &ftype)
     {

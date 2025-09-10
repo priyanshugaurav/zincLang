@@ -560,8 +560,11 @@ ExprPtr Parser::indexExpr(ExprPtr array)
 
 ExprPtr Parser::primary()
 {
-    if (match({TokenType::Number}))
-        return std::make_shared<LiteralExpr>(previous().value, "int");
+    if (match({TokenType::Number})) {
+        std::string val = previous().value;
+        std::string type = (val.find('.') != std::string::npos) ? "float" : "int";
+        return std::make_shared<LiteralExpr>(val, type);
+    }
 
     if (match({TokenType::String}))
         return std::make_shared<LiteralExpr>(previous().value, "string");
@@ -584,7 +587,6 @@ ExprPtr Parser::primary()
 
     throw std::runtime_error("Expected expression at line " + std::to_string(peek().line));
 }
-
 
 ExprPtr Parser::arrayLiteral()
 {
