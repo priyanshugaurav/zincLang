@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <regex>
 
 // Forward declaration
 struct ASTNode;
@@ -26,10 +27,31 @@ struct ASTNode {
 struct Expression : ASTNode {};
 
 // Literal expressions: int, float, bool, string
+// Literal expressions: int, float, bool, string
 struct LiteralExpr : Expression {
-    std::string value; // store raw lexeme for now
-    LiteralExpr(const std::string &val) : value(val) {}
+    std::string value;   // raw lexeme
+    std::string type;    // "int", "float", "bool", "string"
+
+    // Manual constructor (already exists)
+    LiteralExpr(const std::string &val, const std::string &t) 
+        : value(val), type(t) {}
+
+    // New auto-detect constructor
+    LiteralExpr(const std::string &val) : value(val)
+    {
+        if (std::regex_match(val, std::regex(R"(\d+)"))) {
+            type = "int";
+        } else if (std::regex_match(val, std::regex(R"(\d+\.\d+)"))) {
+            type = "float";
+        } else if (val == "true" || val == "false") {
+            type = "bool";
+        } else {
+            type = "string";
+        }
+    }
 };
+
+
 
 // Identifier expression
 struct IdentifierExpr : Expression {

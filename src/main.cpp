@@ -5,6 +5,8 @@
 #include "lexer/lexer.h"
 #include "parser/parser.h"
 #include "ast/ast.h"
+#include "sema/environment.h"
+#include "sema/typechecker.h"
 
 // ---------------------------
 // Utilities
@@ -47,7 +49,8 @@ std::string tokenTypeToString(TokenType t)
         return "True";
     case TokenType::False:
         return "False";
-    case TokenType::Then: return "Then";
+    case TokenType::Then:
+        return "Then";
 
     case TokenType::Identifier:
         return "Identifier";
@@ -141,51 +144,66 @@ std::string indentStr(int indent)
 
 void printAST(const ExprPtr &expr, int indent)
 {
-    if (!expr) return;
+    if (!expr)
+        return;
 
     auto ind = indentStr(indent);
 
-    if (auto lit = std::dynamic_pointer_cast<LiteralExpr>(expr)) {
-        std::cout << ind << "Literal: " << lit->value << "\n";
-    }
-    else if (auto id = std::dynamic_pointer_cast<IdentifierExpr>(expr)) {
+    if (auto lit = std::dynamic_pointer_cast<LiteralExpr>(expr))
+{
+    std::cout << ind << "Literal: " << lit->value 
+              << " (type: " << lit->type << ")\n";
+}
+
+    else if (auto id = std::dynamic_pointer_cast<IdentifierExpr>(expr))
+    {
         std::cout << ind << "Identifier: " << id->name << "\n";
     }
-    else if (auto bin = std::dynamic_pointer_cast<BinaryExpr>(expr)) {
+    else if (auto bin = std::dynamic_pointer_cast<BinaryExpr>(expr))
+    {
         std::cout << ind << "BinaryExpr: " << bin->op << "\n";
         printAST(bin->lhs, indent + 1);
         printAST(bin->rhs, indent + 1);
     }
-    else if (auto un = std::dynamic_pointer_cast<UnaryExpr>(expr)) {
+    else if (auto un = std::dynamic_pointer_cast<UnaryExpr>(expr))
+    {
         std::cout << ind << "UnaryExpr: " << un->op << "\n";
         printAST(un->rhs, indent + 1);
     }
-    else if (auto call = std::dynamic_pointer_cast<CallExpr>(expr)) {
+    else if (auto call = std::dynamic_pointer_cast<CallExpr>(expr))
+    {
         std::cout << ind << "CallExpr:\n";
         printAST(call->callee, indent + 1);
-        for (auto &arg : call->args) printAST(arg, indent + 1);
+        for (auto &arg : call->args)
+            printAST(arg, indent + 1);
     }
-    else if (auto arr = std::dynamic_pointer_cast<ArrayExpr>(expr)) {
+    else if (auto arr = std::dynamic_pointer_cast<ArrayExpr>(expr))
+    {
         std::cout << ind << "ArrayExpr:\n";
-        for (auto &el : arr->elements) printAST(el, indent + 1);
+        for (auto &el : arr->elements)
+            printAST(el, indent + 1);
     }
-    else if (auto idx = std::dynamic_pointer_cast<IndexExpr>(expr)) {
+    else if (auto idx = std::dynamic_pointer_cast<IndexExpr>(expr))
+    {
         std::cout << ind << "IndexExpr:\n";
         printAST(idx->array, indent + 1);
         printAST(idx->index, indent + 1);
     }
-    else if (auto ife = std::dynamic_pointer_cast<IfExpr>(expr)) {
+    else if (auto ife = std::dynamic_pointer_cast<IfExpr>(expr))
+    {
         std::cout << ind << "IfExpr:\n";
-        std::cout << indentStr(indent+1) << "Condition:\n";
-        printAST(ife->condition, indent+2);
-        std::cout << indentStr(indent+1) << "Then:\n";
-        printAST(ife->thenBranch, indent+2);
-        if (ife->elseBranch) {
-            std::cout << indentStr(indent+1) << "Else:\n";
-            printAST(ife->elseBranch, indent+2);
+        std::cout << indentStr(indent + 1) << "Condition:\n";
+        printAST(ife->condition, indent + 2);
+        std::cout << indentStr(indent + 1) << "Then:\n";
+        printAST(ife->thenBranch, indent + 2);
+        if (ife->elseBranch)
+        {
+            std::cout << indentStr(indent + 1) << "Else:\n";
+            printAST(ife->elseBranch, indent + 2);
         }
     }
-    else if (auto arrAssign = std::dynamic_pointer_cast<ArrayAssignExpr>(expr)) {
+    else if (auto arrAssign = std::dynamic_pointer_cast<ArrayAssignExpr>(expr))
+    {
         std::cout << ind << "ArrayAssignExpr:\n";
         std::cout << ind << "  Array:\n";
         printAST(arrAssign->array, indent + 2);
@@ -194,69 +212,80 @@ void printAST(const ExprPtr &expr, int indent)
         std::cout << ind << "  Value:\n";
         printAST(arrAssign->value, indent + 2);
     }
-    else {
+    else
+    {
         std::cout << ind << "UnknownExpr\n";
     }
 }
 
-
-
-void printAST(const StmtPtr &stmt, int indent) {
-    auto ind = std::string(indent*2, ' ');
-    if (!stmt) {
+void printAST(const StmtPtr &stmt, int indent)
+{
+    auto ind = std::string(indent * 2, ' ');
+    if (!stmt)
+    {
         std::cout << ind << "nullptr statement\n";
         return;
     }
 
-    if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt)) {
+    if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
+    {
         std::cout << ind << "VarDecl: " << v->name << (v->isMutable ? " (var)" : " (let)") << "\n";
-        printAST(v->initializer, indent+1);
+        printAST(v->initializer, indent + 1);
     }
-    else if (auto f = std::dynamic_pointer_cast<FuncDecl>(stmt)) {
+    else if (auto f = std::dynamic_pointer_cast<FuncDecl>(stmt))
+    {
         std::cout << ind << "FuncDecl: " << f->name << "\n";
         for (auto &[n, t] : f->params)
             std::cout << ind << "  Param: " << n << " : " << t << "\n";
-        printAST(f->body, indent+1);
+        printAST(f->body, indent + 1);
     }
-    else if (auto b = std::dynamic_pointer_cast<BlockStmt>(stmt)) {
+    else if (auto b = std::dynamic_pointer_cast<BlockStmt>(stmt))
+    {
         std::cout << ind << "BlockStmt:\n";
         for (auto &s : b->statements)
-            printAST(s, indent+1);
+            printAST(s, indent + 1);
         if (b->statements.empty())
             std::cout << ind << "  <empty>\n";
     }
-    else if (auto e = std::dynamic_pointer_cast<ExprStmt>(stmt)) {
+    else if (auto e = std::dynamic_pointer_cast<ExprStmt>(stmt))
+    {
         std::cout << ind << "ExprStmt:\n";
-        printAST(e->expr, indent+1);
+        printAST(e->expr, indent + 1);
     }
-    else if (auto i = std::dynamic_pointer_cast<IfStmt>(stmt)) {
+    else if (auto i = std::dynamic_pointer_cast<IfStmt>(stmt))
+    {
         std::cout << ind << "IfStmt:\n";
-        printAST(i->condition, indent+1);
-        printAST(i->thenBranch, indent+1);
+        printAST(i->condition, indent + 1);
+        printAST(i->thenBranch, indent + 1);
         if (i->elseBranch)
-            printAST(i->elseBranch, indent+1);
+            printAST(i->elseBranch, indent + 1);
     }
-    else if (auto w = std::dynamic_pointer_cast<WhileStmt>(stmt)) {
+    else if (auto w = std::dynamic_pointer_cast<WhileStmt>(stmt))
+    {
         std::cout << ind << "WhileStmt:\n";
-        printAST(w->condition, indent+1);
-        printAST(w->body, indent+1);
+        printAST(w->condition, indent + 1);
+        printAST(w->body, indent + 1);
     }
-    else if (auto f = std::dynamic_pointer_cast<ForStmt>(stmt)) {
+    else if (auto f = std::dynamic_pointer_cast<ForStmt>(stmt))
+    {
         std::cout << ind << "ForStmt: " << f->iterator << "\n";
-        printAST(f->iterable, indent+1);
-        printAST(f->body, indent+1);
+        printAST(f->iterable, indent + 1);
+        printAST(f->body, indent + 1);
     }
-    else if (auto t = std::dynamic_pointer_cast<TimesStmt>(stmt)) {
+    else if (auto t = std::dynamic_pointer_cast<TimesStmt>(stmt))
+    {
         std::cout << ind << "TimesStmt:\n";
-        printAST(t->count, indent+1);
-        printAST(t->body, indent+1);
+        printAST(t->count, indent + 1);
+        printAST(t->body, indent + 1);
     }
-    else if (auto r = std::dynamic_pointer_cast<ReturnStmt>(stmt)) {
+    else if (auto r = std::dynamic_pointer_cast<ReturnStmt>(stmt))
+    {
         std::cout << ind << "ReturnStmt:\n";
-        printAST(r->value, indent+1);
+        printAST(r->value, indent + 1);
     }
-    
-    else {
+
+    else
+    {
         std::cout << ind << "UnknownStmt\n";
     }
 }
@@ -293,6 +322,20 @@ int main(int argc, char *argv[])
 
         std::cout << "\n===== AST =====\n";
         printAST(ast);
+
+        std::cout << "\n===== Type Checking =====\n";
+        try
+        {
+            auto globalEnv = std::make_shared<Environment>();
+            TypeChecker checker(globalEnv);
+            checker.check(ast);
+            std::cout << "✅ Type checking passed!\n";
+        }
+        catch (const std::exception &ex)
+        {
+            std::cerr << "Type Error: " << ex.what() << "\n";
+            return 1;
+        }
     }
     catch (const std::exception &ex)
     {
