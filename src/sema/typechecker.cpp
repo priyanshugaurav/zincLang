@@ -87,18 +87,24 @@ void TypeChecker::checkStmt(const StmtPtr &stmt)
             nullable = true;
             baseType.pop_back(); // remove '?'
         }
+        if (!baseType.empty() && !nullable && !v->initializer)
+        {
+            throw std::runtime_error("Variable '" + v->name + "' of non-nullable type '" + baseType + "' must be initialized at declaration");
+        }
 
         // Infer type for untyped vars
         bool isDynamic = false;
         if (baseType.empty())
         {
-            if (!v->initializer)
+            isDynamic = true; // no type hint => dynamic
+            if (v->initializer)
             {
-                throw std::runtime_error("Variable '" + v->name +
-                                         "' must have either initializer or type hint");
+                baseType = inferExpr(v->initializer);
             }
-            baseType = inferExpr(v->initializer);
-            isDynamic = true; // untyped vars = dynamic
+            else
+            {
+                baseType = "dynamic"; // placeholder type until assigned
+            }
         }
 
         // initializer exists, check type match for explicitly typed
@@ -420,8 +426,8 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
                 if (valType != symOpt->type)
                 {
                     // if (!(isIntType(valType) && isFloatType(symOpt->type)))
-                        throw std::runtime_error("Assignment type mismatch for '" + lhsId->name +
-                                                 "': expected " + symOpt->type + ", got " + valType);
+                    throw std::runtime_error("Assignment type mismatch for '" + lhsId->name +
+                                             "': expected " + symOpt->type + ", got " + valType);
                 }
 
                 return symOpt->type;

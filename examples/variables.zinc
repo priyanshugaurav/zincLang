@@ -1,0 +1,4 @@
+fn main(){
+    var a:int;
+    a = 10
+}
