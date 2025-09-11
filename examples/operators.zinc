@@ -26,12 +26,7 @@ fn main() {
     // Comparison Operators
     // -----------------------------
     var g:bool?
-    g = a == b
-    g = a != b
-    g = a < b
-    g = a <= b
-    g = a > b
-    g = a >= b
+
 
     var h:bool?
     h = true == false

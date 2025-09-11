@@ -49,7 +49,7 @@ fn main() {
     var r:int = 5
      //r = 2.5           // ❌ error: int cannot take float no type conv for now
     var f2:float = 2.5
-    //f2 = 10             // ❌ int->float no implicit conversion for now
+    f2 = 10             // ❌ int->float no implicit conversion for now
 
     // -----------------------------
     // Let immutability
