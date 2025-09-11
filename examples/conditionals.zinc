@@ -1,0 +1,14 @@
+fn main(){
+    var a:int = 10;
+    if(10>a){
+        print(2)
+    }
+    else if(2>2){
+        print("fsd")
+    }else{
+        print("dsf")
+    }
+
+
+    var b:int = if 10>a {30} else if 10<a {20} else {10}
+}

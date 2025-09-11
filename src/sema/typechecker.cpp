@@ -350,94 +350,43 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
     }
 
     // Binary
-    if (auto bin = std::dynamic_pointer_cast<BinaryExpr>(expr))
-    {
-        // assignment operator handled here: lhs must be identifier
-        if (bin->op == "=")
-        {
-            std::string valType = inferExpr(bin->rhs);
+    if (auto bin = std::dynamic_pointer_cast<BinaryExpr>(expr)) {
+    // assignment operator
+    if (bin->op == "=") {
+        std::string valType = inferExpr(bin->rhs);
 
-            auto lhsId = std::dynamic_pointer_cast<IdentifierExpr>(bin->lhs);
-            if (!lhsId)
-                throw std::runtime_error("Invalid assignment target");
+        auto lhsId = std::dynamic_pointer_cast<IdentifierExpr>(bin->lhs);
+        if (!lhsId)
+            throw std::runtime_error("Invalid assignment target");
 
-            auto symOpt = env->lookup(lhsId->name);
-            if (!symOpt.has_value())
-                throw std::runtime_error("Assignment to undefined variable: " + lhsId->name);
+        auto symOpt = env->lookup(lhsId->name);
+        if (!symOpt.has_value())
+            throw std::runtime_error("Assignment to undefined variable: " + lhsId->name);
 
-            // immutability check
-            if (!symOpt->isMutable)
-                throw std::runtime_error("Cannot assign to immutable variable (let): " + lhsId->name);
+        if (!symOpt->isMutable)
+            throw std::runtime_error("Cannot assign to immutable variable (let): " + lhsId->name);
 
-            // null check
-            if (valType == "null")
-            {
-                if (!symOpt->isNullable)
-                    throw std::runtime_error("Cannot assign null to non-nullable variable '" + lhsId->name + "'");
-                return symOpt->type;
-            }
-
-            // strict type check
-            if (!symOpt->isDynamic && valType != symOpt->type)
-            {
-                // allow int -> float widening
-                // if (!(isIntType(valType) && isFloatType(symOpt->type)))
-                {
-                    throw std::runtime_error("Assignment type mismatch for '" + lhsId->name +
-                                             "': expected " + symOpt->type + ", got " + valType);
-                }
-            }
-
-            // dynamic variable: update type
-            if (symOpt->isDynamic)
-                symOpt->type = valType;
-
+        // nullability check
+        if (valType == "null") {
+            if (!symOpt->isNullable)
+                throw std::runtime_error("Cannot assign null to non-nullable variable '" + lhsId->name + "'");
             return symOpt->type;
         }
 
-        {
-            std::string valType = inferExpr(bin->rhs);
-
-            if (auto lhsId = std::dynamic_pointer_cast<IdentifierExpr>(bin->lhs))
-            {
-                auto symOpt = env->lookup(lhsId->name);
-                if (!symOpt.has_value())
-                    throw std::runtime_error("Assignment to undefined variable: " + lhsId->name);
-
-                if (!symOpt->isMutable)
-                    throw std::runtime_error("Cannot assign to immutable variable (let): " + lhsId->name);
-
-                // Nullability
-                if (valType == "null")
-                {
-                    if (!symOpt->isNullable)
-                        throw std::runtime_error("Cannot assign null to non-nullable variable '" + lhsId->name + "'");
-                    return symOpt->type;
-                }
-
-                // Dynamic vars: type update
-                if (symOpt->isDynamic)
-                {
-                    symOpt->type = valType;
-                    return symOpt->type;
-                }
-
-                // Strict vars: type must match (int->float widening allowed)
-                if (valType != symOpt->type)
-                {
-                    // if (!(isIntType(valType) && isFloatType(symOpt->type)))
-                    throw std::runtime_error("Assignment type mismatch for '" + lhsId->name +
-                                             "': expected " + symOpt->type + ", got " + valType);
-                }
-
-                return symOpt->type;
-            }
-
-            throw std::runtime_error("Invalid assignment target");
+        // strict type check
+        if (!symOpt->isDynamic && valType != symOpt->type) {
+            throw std::runtime_error("Assignment type mismatch for '" + lhsId->name +
+                                     "': expected " + symOpt->type + ", got " + valType);
         }
 
-        // arithmetic ops
-        const std::string &op = bin->op;
+        // dynamic update
+        if (symOpt->isDynamic)
+            symOpt->type = valType;
+
+        return symOpt->type;
+    }
+    // -------- else, arithmetic / comparison / logical ops --------
+    const std::string &op = bin->op;
         if (op == "+" || op == "-" || op == "*" || op == "/" || op == "%")
         {
             std::string L = inferExpr(bin->lhs);

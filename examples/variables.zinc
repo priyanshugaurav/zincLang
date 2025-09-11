@@ -1,4 +1,60 @@
-fn main(){
-    var a:int;
-    a = 10
+fn main() {
+    // -----------------------------
+    // LET vs VAR
+    // -----------------------------
+    let x = 10          // immutable, type inferred as int
+    var y = 20          // mutable, type inferred as int
+    //x = 15            // ❌ should fail: immutable
+    y = 25              // ✅ allowed
+
+    // -----------------------------
+    // Explicit type
+    // -----------------------------
+    var a:int = 10      // ✅ OK: initialized
+    //var b:int         // ❌ error: non-nullable must initialize
+    var c:int?          // ✅ nullable, can initialize later
+    c = 5               // ✅ allowed
+
+    let s:string = "hi" // ✅ immutable string
+    //var t:string         // ❌ error: non-nullable without initializer
+    var u:string?        // ✅ nullable string
+    u = "hello"
+
+    // -----------------------------
+    // Type inference
+    // -----------------------------
+    var i = 100         // inferred as int
+    var f = 1.5         // inferred as float
+    var bval = true     // inferred as bool
+    var strval = "ok"   // inferred as string
+
+    // -----------------------------
+    // Dynamic typing
+    // -----------------------------
+    var dyn             // dynamic, no type hint, not initialized
+    dyn = 10            // int
+    dyn = "text"        // string ✅ allowed
+    dyn = true          // bool ✅ allowed
+
+    // -----------------------------
+    // Nullable
+    // -----------------------------
+    var n:int?          // nullable int
+    n = null            // ✅ allowed
+    n = 50              // ✅ allowed
+
+    // -----------------------------
+    // Reassignment type errors
+    // -----------------------------
+    var r:int = 5
+     //r = 2.5           // ❌ error: int cannot take float no type conv for now
+    var f2:float = 2.5
+    //f2 = 10             // ❌ int->float no implicit conversion for now
+
+    // -----------------------------
+    // Let immutability
+    // -----------------------------
+    let imm:int = 1
+     //imm = 2           // ❌ error: cannot reassign let
+
 }

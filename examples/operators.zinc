@@ -1,4 +1,63 @@
-while i < 10 {
-    print(i)
-    i = i + 1
+fn main() {
+    // -----------------------------
+    // Arithmetic Operators
+    // -----------------------------
+    var a = 10
+    var b = 3
+    var c:int?
+    var d:float =  1.0
+
+    c = a + b       // int + int -> int
+    d = a + 2.5     // int + float -> float
+    d = 1.5 + 2.5   // float + float -> float
+    c = a - b
+    d = a - 2.5
+    c = a * b
+    d = a * 2.5
+    c = a / b
+    d = a / 2.5
+    c = a % b       // modulo
+
+    // Unary
+    var e = -a      // unary minus
+    var f = !true   // logical NOT
+
+    // -----------------------------
+    // Comparison Operators
+    // -----------------------------
+    var g:bool?
+    g = a == b
+    g = a != b
+    g = a < b
+    g = a <= b
+    g = a > b
+    g = a >= b
+
+    var h:bool?
+    h = true == false
+    h = "hi" == "hello"   // string comparison
+
+    // numeric mix: int vs float
+    g = a < 2.5
+    g = 3.5 >= b
+
+    // -----------------------------
+    // Logical Operators
+    // -----------------------------
+    var i:bool?
+    i = true && false
+    i = true || false
+    i = !i
+
+    // -----------------------------
+    // Assignment Operators
+    // -----------------------------
+    var x = 5
+    var y = 2
+    x = y + 3          // valid assignment
+    x = "text"       
+    var dyn            // dynamic variable
+    dyn = 10
+    dyn = "text"       // allowed for dynamic
+
 }
