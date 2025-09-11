@@ -74,75 +74,75 @@ void TypeChecker::checkStmt(const StmtPtr &stmt)
     if (!stmt)
         return;
 
-// ---------------------------
-// VarDecl
-// ---------------------------
-if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
-{
-    bool nullable = false;
-    std::string baseType = v->typeHint;
-
-    // check for nullable type
-    if (!v->typeHint.empty() && v->typeHint.back() == '?')
+    // ---------------------------
+    // VarDecl
+    // ---------------------------
+    if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
     {
-        nullable = true;
-        baseType.pop_back(); // remove '?'
-    }
+        bool nullable = false;
+        std::string baseType = v->typeHint;
 
-    // if no initializer
-    if (!v->initializer)
-    {
-        if (baseType.empty())
+        // check for nullable type
+        if (!v->typeHint.empty() && v->typeHint.back() == '?')
         {
-            throw std::runtime_error("Variable '" + v->name +
-                                     "' must have either initializer or type hint");
+            nullable = true;
+            baseType.pop_back(); // remove '?'
         }
 
-        // non-nullable must have initializer
-        if (!nullable)
+        // if no initializer
+        if (!v->initializer)
         {
-            throw std::runtime_error("Variable '" + v->name +
-                                     "' of type '" + baseType +
-                                     "' must be initialized (non-nullable)");
+            if (baseType.empty())
+            {
+                throw std::runtime_error("Variable '" + v->name +
+                                         "' must have either initializer or type hint");
+            }
+
+            // non-nullable must have initializer
+            if (!nullable)
+            {
+                throw std::runtime_error("Variable '" + v->name +
+                                         "' of type '" + baseType +
+                                         "' must be initialized (non-nullable)");
+            }
+
+            // nullable vars can be uninitialized (defaults to null)
+            if (!env->define(v->name, baseType, v->isMutable, -1, false, true))
+            {
+                throw std::runtime_error("Symbol already defined in this scope: " + v->name);
+            }
+            return; // done
         }
 
-        // nullable vars can be uninitialized (defaults to null)
-        if (!env->define(v->name, baseType, v->isMutable, -1, false, true))
+        // initializer exists
+        std::string initType = inferExpr(v->initializer);
+
+        // allow null only for nullable types
+        if (initType == "null")
+        {
+            if (!nullable)
+            {
+                throw std::runtime_error("Cannot assign null to non-nullable variable '" + v->name + "'");
+            }
+        }
+        else
+        {
+            if (initType != baseType)
+            {
+                throw std::runtime_error("Type mismatch for variable '" + v->name +
+                                         "': expected " + baseType + ", got " + initType);
+            }
+        }
+
+        // define variable in environment
+        bool isDyn = v->isMutable; // mutable = dynamic
+        if (!env->define(v->name, baseType, v->isMutable, -1, isDyn, nullable))
         {
             throw std::runtime_error("Symbol already defined in this scope: " + v->name);
         }
+
         return; // done
     }
-
-    // initializer exists
-    std::string initType = inferExpr(v->initializer);
-
-    // allow null only for nullable types
-    if (initType == "null")
-    {
-        if (!nullable)
-        {
-            throw std::runtime_error("Cannot assign null to non-nullable variable '" + v->name + "'");
-        }
-    }
-    else
-    {
-        if (initType != baseType)
-        {
-            throw std::runtime_error("Type mismatch for variable '" + v->name +
-                                     "': expected " + baseType + ", got " + initType);
-        }
-    }
-
-    // define variable in environment
-    bool isDyn = v->isMutable; // mutable = dynamic
-    if (!env->define(v->name, baseType, v->isMutable, -1, isDyn, nullable))
-    {
-        throw std::runtime_error("Symbol already defined in this scope: " + v->name);
-    }
-
-    return; // done
-}
 
     // ExprStmt
     if (auto e = std::dynamic_pointer_cast<ExprStmt>(stmt))
@@ -360,7 +360,6 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
         // assignment operator handled here: lhs must be identifier
         if (bin->op == "=")
         {
-            // lhs must be IdentifierExpr or IndexExpr
             std::string valType = inferExpr(bin->rhs);
 
             if (auto lhsId = std::dynamic_pointer_cast<IdentifierExpr>(bin->lhs))
@@ -373,10 +372,18 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
                 if (!symOpt->isMutable)
                     throw std::runtime_error("Cannot assign to immutable variable (let): " + lhsId->name);
 
+                // ✅ handle nullable
+                if (valType == "null")
+                {
+                    if (!symOpt->isNullable)
+                        throw std::runtime_error("Cannot assign null to non-nullable variable '" + lhsId->name + "'");
+                    return symOpt->type; // null is allowed for nullable
+                }
+
                 // type match or int->float widening
                 if (valType != symOpt->type)
                 {
-                    if (!symOpt->isDynamic) // <-- consider dynamic
+                    if (!symOpt->isDynamic) // consider dynamic
                     {
                         if (!(isIntType(valType) && isFloatType(symOpt->type)))
                             throw std::runtime_error("Assignment type mismatch for '" + lhsId->name +
@@ -389,26 +396,6 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
                 }
 
                 return symOpt->type;
-            }
-
-            // allow array element assignment
-            if (auto lhsIdx = std::dynamic_pointer_cast<IndexExpr>(bin->lhs))
-            {
-                std::string arrType = inferExpr(lhsIdx->array);
-                if (!isArrayType(arrType))
-                    throw std::runtime_error("Index assignment target is not array");
-
-                std::string elemType = arrayElementType(arrType);
-                std::string idxType = inferExpr(lhsIdx->index);
-                if (!isIntType(idxType))
-                    throw std::runtime_error("Array index must be int");
-
-                if (valType != elemType)
-                {
-
-                    throw std::runtime_error("Array assignment type mismatch: expected " + elemType + ", got " + valType);
-                }
-                return elemType;
             }
 
             throw std::runtime_error("Invalid assignment target");
