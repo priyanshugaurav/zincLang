@@ -1,7 +1,3 @@
-fn main() {
-    var a: int = 5;
-    a = 3.14;   // ❌ float assigned to int
-
-    var b: string = "abc";
-    b = true;   // ❌ bool assigned to string
+fn main(){
+    
 }

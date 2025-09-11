@@ -76,7 +76,6 @@ void TypeChecker::checkStmt(const StmtPtr &stmt)
 
     // ---------------------------
     // VarDecl
-    // ---------------------------
     if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
     {
         bool nullable = false;
@@ -89,59 +88,49 @@ void TypeChecker::checkStmt(const StmtPtr &stmt)
             baseType.pop_back(); // remove '?'
         }
 
-        // if no initializer
-        if (!v->initializer)
+        // Infer type for untyped vars
+        bool isDynamic = false;
+        if (baseType.empty())
         {
-            if (baseType.empty())
+            if (!v->initializer)
             {
                 throw std::runtime_error("Variable '" + v->name +
                                          "' must have either initializer or type hint");
             }
-
-            // non-nullable must have initializer
-            if (!nullable)
-            {
-                throw std::runtime_error("Variable '" + v->name +
-                                         "' of type '" + baseType +
-                                         "' must be initialized (non-nullable)");
-            }
-
-            // nullable vars can be uninitialized (defaults to null)
-            if (!env->define(v->name, baseType, v->isMutable, -1, false, true))
-            {
-                throw std::runtime_error("Symbol already defined in this scope: " + v->name);
-            }
-            return; // done
+            baseType = inferExpr(v->initializer);
+            isDynamic = true; // untyped vars = dynamic
         }
 
-        // initializer exists
-        std::string initType = inferExpr(v->initializer);
+        // initializer exists, check type match for explicitly typed
+        if (v->initializer)
+        {
+            std::string initType = inferExpr(v->initializer);
 
-        // allow null only for nullable types
-        if (initType == "null")
-        {
-            if (!nullable)
+            if (initType == "null")
             {
-                throw std::runtime_error("Cannot assign null to non-nullable variable '" + v->name + "'");
+                if (!nullable)
+                {
+                    throw std::runtime_error("Cannot assign null to non-nullable variable '" + v->name + "'");
+                }
             }
-        }
-        else
-        {
-            if (initType != baseType)
+            else if (!isDynamic && initType != baseType)
             {
                 throw std::runtime_error("Type mismatch for variable '" + v->name +
                                          "': expected " + baseType + ", got " + initType);
             }
+
+            // If dynamic, update type to initializer type
+            if (isDynamic)
+                baseType = initType;
         }
 
         // define variable in environment
-        bool isDyn = v->isMutable; // mutable = dynamic
-        if (!env->define(v->name, baseType, v->isMutable, -1, isDyn, nullable))
+        if (!env->define(v->name, baseType, v->isMutable, -1, isDynamic, nullable))
         {
             throw std::runtime_error("Symbol already defined in this scope: " + v->name);
         }
 
-        return; // done
+        return;
     }
 
     // ExprStmt
@@ -362,37 +351,77 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
         {
             std::string valType = inferExpr(bin->rhs);
 
+            auto lhsId = std::dynamic_pointer_cast<IdentifierExpr>(bin->lhs);
+            if (!lhsId)
+                throw std::runtime_error("Invalid assignment target");
+
+            auto symOpt = env->lookup(lhsId->name);
+            if (!symOpt.has_value())
+                throw std::runtime_error("Assignment to undefined variable: " + lhsId->name);
+
+            // immutability check
+            if (!symOpt->isMutable)
+                throw std::runtime_error("Cannot assign to immutable variable (let): " + lhsId->name);
+
+            // null check
+            if (valType == "null")
+            {
+                if (!symOpt->isNullable)
+                    throw std::runtime_error("Cannot assign null to non-nullable variable '" + lhsId->name + "'");
+                return symOpt->type;
+            }
+
+            // strict type check
+            if (!symOpt->isDynamic && valType != symOpt->type)
+            {
+                // allow int -> float widening
+                // if (!(isIntType(valType) && isFloatType(symOpt->type)))
+                {
+                    throw std::runtime_error("Assignment type mismatch for '" + lhsId->name +
+                                             "': expected " + symOpt->type + ", got " + valType);
+                }
+            }
+
+            // dynamic variable: update type
+            if (symOpt->isDynamic)
+                symOpt->type = valType;
+
+            return symOpt->type;
+        }
+
+        {
+            std::string valType = inferExpr(bin->rhs);
+
             if (auto lhsId = std::dynamic_pointer_cast<IdentifierExpr>(bin->lhs))
             {
                 auto symOpt = env->lookup(lhsId->name);
                 if (!symOpt.has_value())
                     throw std::runtime_error("Assignment to undefined variable: " + lhsId->name);
 
-                // immutability check
                 if (!symOpt->isMutable)
                     throw std::runtime_error("Cannot assign to immutable variable (let): " + lhsId->name);
 
-                // ✅ handle nullable
+                // Nullability
                 if (valType == "null")
                 {
                     if (!symOpt->isNullable)
                         throw std::runtime_error("Cannot assign null to non-nullable variable '" + lhsId->name + "'");
-                    return symOpt->type; // null is allowed for nullable
+                    return symOpt->type;
                 }
 
-                // type match or int->float widening
+                // Dynamic vars: type update
+                if (symOpt->isDynamic)
+                {
+                    symOpt->type = valType;
+                    return symOpt->type;
+                }
+
+                // Strict vars: type must match (int->float widening allowed)
                 if (valType != symOpt->type)
                 {
-                    if (!symOpt->isDynamic) // consider dynamic
-                    {
-                        if (!(isIntType(valType) && isFloatType(symOpt->type)))
-                            throw std::runtime_error("Assignment type mismatch for '" + lhsId->name +
-                                                     "': expected " + symOpt->type + ", got " + valType);
-                    }
-                    else
-                    {
-                        symOpt->type = valType; // dynamic type update
-                    }
+                    // if (!(isIntType(valType) && isFloatType(symOpt->type)))
+                        throw std::runtime_error("Assignment type mismatch for '" + lhsId->name +
+                                                 "': expected " + symOpt->type + ", got " + valType);
                 }
 
                 return symOpt->type;
