@@ -10,6 +10,7 @@ enum class TokenType {
     Identifier,
     Number,     // integer or float (lexed as text)
     String,
+    Null, 
 
     // Keywords
     Let,
@@ -25,6 +26,7 @@ enum class TokenType {
     Times,
     True,
     False,
+    Question,
 
     // Punctuation
     LParen, RParen,

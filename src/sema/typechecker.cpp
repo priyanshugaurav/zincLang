@@ -74,55 +74,75 @@ void TypeChecker::checkStmt(const StmtPtr &stmt)
     if (!stmt)
         return;
 
-    // VarDecl
-    if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
-    {
-        if (!v->initializer)
-        {
-            throw std::runtime_error("Variable '" + v->name + "' must be initialized in MVP v1");
-        }
-
-        std::string initType = inferExpr(v->initializer);
-
-        // --- NEW ARRAY HANDLING ---
-        if (auto arrayExpr = std::dynamic_pointer_cast<ArrayExpr>(v->initializer))
-        {
-            std::string elemType = arrayElementType(initType);
-            int arrSize = static_cast<int>(arrayExpr->elements.size());
-            if (!env->define(v->name, "array<" + elemType + ">", v->isMutable, arrSize))
-            {
-                throw std::runtime_error("Symbol already defined in this scope: " + v->name);
-            }
-            return; // done
-        }
-        // --- END ARRAY HANDLING ---
-
-        // if type hint present, ensure match
-        // if type hint present, ensure match
-        if (!v->typeHint.empty())
-        {
-            if (v->typeHint != initType)
-            {
-                throw std::runtime_error("Type mismatch for variable '" + v->name +
-                                         "': annotation " + v->typeHint + " != initializer " + initType);
-            }
-            if (!env->define(v->name, v->typeHint, v->isMutable))
-            {
-                throw std::runtime_error("Symbol already defined in this scope: " + v->name);
-            }
-        }
-        else
-        {
-            bool isDyn = v->isMutable;  // treat all mutable vars as dynamic
-            if (!env->define(v->name, initType, v->isMutable, -1, isDyn))
+// ---------------------------
+// VarDecl
+// ---------------------------
+if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
 {
-    throw std::runtime_error("Symbol already defined in this scope: " + v->name);
-}
+    bool nullable = false;
+    std::string baseType = v->typeHint;
 
+    // check for nullable type
+    if (!v->typeHint.empty() && v->typeHint.back() == '?')
+    {
+        nullable = true;
+        baseType.pop_back(); // remove '?'
+    }
+
+    // if no initializer
+    if (!v->initializer)
+    {
+        if (baseType.empty())
+        {
+            throw std::runtime_error("Variable '" + v->name +
+                                     "' must have either initializer or type hint");
         }
 
-        return;
+        // non-nullable must have initializer
+        if (!nullable)
+        {
+            throw std::runtime_error("Variable '" + v->name +
+                                     "' of type '" + baseType +
+                                     "' must be initialized (non-nullable)");
+        }
+
+        // nullable vars can be uninitialized (defaults to null)
+        if (!env->define(v->name, baseType, v->isMutable, -1, false, true))
+        {
+            throw std::runtime_error("Symbol already defined in this scope: " + v->name);
+        }
+        return; // done
     }
+
+    // initializer exists
+    std::string initType = inferExpr(v->initializer);
+
+    // allow null only for nullable types
+    if (initType == "null")
+    {
+        if (!nullable)
+        {
+            throw std::runtime_error("Cannot assign null to non-nullable variable '" + v->name + "'");
+        }
+    }
+    else
+    {
+        if (initType != baseType)
+        {
+            throw std::runtime_error("Type mismatch for variable '" + v->name +
+                                     "': expected " + baseType + ", got " + initType);
+        }
+    }
+
+    // define variable in environment
+    bool isDyn = v->isMutable; // mutable = dynamic
+    if (!env->define(v->name, baseType, v->isMutable, -1, isDyn, nullable))
+    {
+        throw std::runtime_error("Symbol already defined in this scope: " + v->name);
+    }
+
+    return; // done
+}
 
     // ExprStmt
     if (auto e = std::dynamic_pointer_cast<ExprStmt>(stmt))

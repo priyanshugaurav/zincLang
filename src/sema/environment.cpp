@@ -4,13 +4,20 @@
 Environment::Environment(std::shared_ptr<Environment> parentEnv)
     : parent(std::move(parentEnv)) {}
 
-bool Environment::define(const std::string &name, const std::string &type, bool isMutable, int arraySize, bool isDynamic) {
+bool Environment::define(const std::string &name,
+                         const std::string &type,
+                         bool isMutable,
+                         int arraySize,
+                         bool isDynamic,
+                         bool isNullable) {
     if (table.find(name) != table.end()) {
         throw std::runtime_error("Variable '" + name + "' already defined in this scope");
     }
-    table.emplace(name, Symbol{name, type, isMutable, arraySize, isDynamic});
+    table.emplace(name, Symbol{name, type, isMutable, arraySize, isDynamic, isNullable});
     return true;
 }
+
+
 
 
 bool Environment::assign(const std::string& name, const std::string& type, const std::string& value) {
@@ -21,8 +28,29 @@ bool Environment::assign(const std::string& name, const std::string& type, const
             throw std::runtime_error("Cannot assign to immutable variable '" + name + "'");
 
         // Allow type change if dynamic
-        if (!sym.isDynamic && sym.type != type)
-            throw std::runtime_error("Assignment type mismatch for '" + name + "': expected " + sym.type + ", got " + type);
+        if (!sym.isDynamic) {
+    if (sym.isNullable) {
+        // allow null assignment
+        if (type == "null") {
+            sym.value = value;
+            return true;
+        }
+
+        // allow base type assignment (e.g., int fits into int?)
+        std::string baseType = sym.type;
+        if (!baseType.empty() && baseType.back() == '?')
+            baseType.pop_back();
+
+        if (type != baseType)
+            throw std::runtime_error("Assignment type mismatch for '" + name +
+                                     "': expected " + sym.type + ", got " + type);
+    } else {
+        if (sym.type != type)
+            throw std::runtime_error("Assignment type mismatch for '" + name +
+                                     "': expected " + sym.type + ", got " + type);
+    }
+}
+
 
         sym.type = type;   // <-- update type if dynamic
         sym.value = value;

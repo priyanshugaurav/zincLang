@@ -101,7 +101,6 @@ StmtPtr Parser::declaration()
 // simple prototype
 std::string Parser::parseType()
 {
-    // Only allow simple types or generic arrays
     Token name = peek();
     consume(TokenType::Identifier, "Expected type name");
     std::string typeStr = name.value;
@@ -110,6 +109,12 @@ std::string Parser::parseType()
     { // array<int>
         typeStr += "<" + parseType() + ">";
         consume(TokenType::Greater, "Expected '>' after generic type");
+    }
+
+    // handle nullable (int?)
+    if (match({TokenType::Question}))
+    {
+        typeStr += "?";
     }
 
     return typeStr;
@@ -127,8 +132,11 @@ StmtPtr Parser::varDeclaration()
         typeHint = parseType();
     }
 
-    consume(TokenType::Assign, "Expected '=' after variable name.");
-    ExprPtr initializer = expression();
+    ExprPtr initializer = nullptr;
+    if (match({TokenType::Assign}))
+    {
+        initializer = expression();
+    }
 
     // optional semicolon
     if (check(TokenType::Semicolon))
@@ -560,7 +568,8 @@ ExprPtr Parser::indexExpr(ExprPtr array)
 
 ExprPtr Parser::primary()
 {
-    if (match({TokenType::Number})) {
+    if (match({TokenType::Number}))
+    {
         std::string val = previous().value;
         std::string type = (val.find('.') != std::string::npos) ? "float" : "int";
         return std::make_shared<LiteralExpr>(val, type);
@@ -571,6 +580,9 @@ ExprPtr Parser::primary()
 
     if (match({TokenType::True, TokenType::False}))
         return std::make_shared<LiteralExpr>(previous().value, "bool");
+
+    if (match({TokenType::Null})) // ✅ Add this
+        return std::make_shared<LiteralExpr>("null", "null");
 
     if (match({TokenType::Identifier}))
         return std::make_shared<IdentifierExpr>(previous().value);

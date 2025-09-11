@@ -1,16 +1,5 @@
 fn main() {
-
-    let x = 10; //implicit type
-    //x = 10 //error cannot assign to immutable variable 
-
-    let y:int = 10; //explicit type
-    //y = 10 //error cannot assign to immutable variable 
-
-
-    var a = 10 // should be have anythype of value
-    a = "fd" // should work 
-
-    var z:int = 10
-    z = "gdf" //should not work 
-
+    var a:float = 20.8;
+    print(a)
+    a = 20.9;
 }

@@ -125,9 +125,15 @@ std::string tokenTypeToString(TokenType t)
 
     case TokenType::Eof:
         return "Eof";
+        case TokenType::Null:
+        return "Null";
+    case TokenType::Question:
+        return "Question";
+
     case TokenType::Unknown:
         return "Unknown";
     }
+    
     return "???";
 }
 
