@@ -14,10 +14,11 @@ struct Symbol {
     std::string value;  // optional
     int arraySize = -1; // -1 = unknown
     bool isMutable;
+    bool isDynamic = false;
 
-    Symbol() : name(""), type(""), arraySize(-1), isMutable(false) {}
-Symbol(const std::string &n, const std::string &t, bool mut, int arrSize = -1)
-    : name(n), type(t), arraySize(arrSize), isMutable(mut) {}
+    Symbol() : name(""), type(""), arraySize(-1), isMutable(false) , isDynamic(false) {}
+Symbol(const std::string &n, const std::string &t, bool mut, int arrSize = -1 ,  bool dyn = false)
+    : name(n), type(t), arraySize(arrSize), isMutable(mut) , isDynamic(dyn) {}
 
 };
 
@@ -39,7 +40,7 @@ public:
 
     // Add a symbol to current scope
     // Overload to define array with size
-bool define(const std::string &name, const std::string &type, bool isMutable, int arraySize = -1);
+bool define(const std::string &name, const std::string &type, bool isMutable, int arraySize = -1 ,  bool dyn = false);
 
     bool defineFunction(const std::string &name, const FunctionType &ftype)
     {

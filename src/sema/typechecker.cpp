@@ -75,51 +75,54 @@ void TypeChecker::checkStmt(const StmtPtr &stmt)
         return;
 
     // VarDecl
-if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
+    if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
+    {
+        if (!v->initializer)
+        {
+            throw std::runtime_error("Variable '" + v->name + "' must be initialized in MVP v1");
+        }
+
+        std::string initType = inferExpr(v->initializer);
+
+        // --- NEW ARRAY HANDLING ---
+        if (auto arrayExpr = std::dynamic_pointer_cast<ArrayExpr>(v->initializer))
+        {
+            std::string elemType = arrayElementType(initType);
+            int arrSize = static_cast<int>(arrayExpr->elements.size());
+            if (!env->define(v->name, "array<" + elemType + ">", v->isMutable, arrSize))
+            {
+                throw std::runtime_error("Symbol already defined in this scope: " + v->name);
+            }
+            return; // done
+        }
+        // --- END ARRAY HANDLING ---
+
+        // if type hint present, ensure match
+        // if type hint present, ensure match
+        if (!v->typeHint.empty())
+        {
+            if (v->typeHint != initType)
+            {
+                throw std::runtime_error("Type mismatch for variable '" + v->name +
+                                         "': annotation " + v->typeHint + " != initializer " + initType);
+            }
+            if (!env->define(v->name, v->typeHint, v->isMutable))
+            {
+                throw std::runtime_error("Symbol already defined in this scope: " + v->name);
+            }
+        }
+        else
+        {
+            bool isDyn = v->isMutable;  // treat all mutable vars as dynamic
+            if (!env->define(v->name, initType, v->isMutable, -1, isDyn))
 {
-    if (!v->initializer)
-    {
-        throw std::runtime_error("Variable '" + v->name + "' must be initialized in MVP v1");
-    }
-
-    std::string initType = inferExpr(v->initializer);
-
-    // --- NEW ARRAY HANDLING ---
-    if (auto arrayExpr = std::dynamic_pointer_cast<ArrayExpr>(v->initializer))
-    {
-        std::string elemType = arrayElementType(initType);
-        int arrSize = static_cast<int>(arrayExpr->elements.size());
-        if (!env->define(v->name, "array<" + elemType + ">", v->isMutable, arrSize))
-        {
-            throw std::runtime_error("Symbol already defined in this scope: " + v->name);
-        }
-        return; // done
-    }
-    // --- END ARRAY HANDLING ---
-
-    // if type hint present, ensure match
-    if (!v->typeHint.empty())
-    {
-        if (v->typeHint != initType)
-        {
-            throw std::runtime_error("Type mismatch for variable '" + v->name +
-                                     "': annotation " + v->typeHint + " != initializer " + initType);
-        }
-        if (!env->define(v->name, v->typeHint, v->isMutable))
-        {
-            throw std::runtime_error("Symbol already defined in this scope: " + v->name);
-        }
-    }
-    else
-    {
-        if (!env->define(v->name, initType, v->isMutable))
-        {
-            throw std::runtime_error("Symbol already defined in this scope: " + v->name);
-        }
-    }
-
-    return;
+    throw std::runtime_error("Symbol already defined in this scope: " + v->name);
 }
+
+        }
+
+        return;
+    }
 
     // ExprStmt
     if (auto e = std::dynamic_pointer_cast<ExprStmt>(stmt))
@@ -353,10 +356,18 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
                 // type match or int->float widening
                 if (valType != symOpt->type)
                 {
-                    if (!(isIntType(valType) && isFloatType(symOpt->type)))
-                        throw std::runtime_error("Assignment type mismatch for '" + lhsId->name +
-                                                 "': expected " + symOpt->type + ", got " + valType);
+                    if (!symOpt->isDynamic) // <-- consider dynamic
+                    {
+                        if (!(isIntType(valType) && isFloatType(symOpt->type)))
+                            throw std::runtime_error("Assignment type mismatch for '" + lhsId->name +
+                                                     "': expected " + symOpt->type + ", got " + valType);
+                    }
+                    else
+                    {
+                        symOpt->type = valType; // dynamic type update
+                    }
                 }
+
                 return symOpt->type;
             }
 
@@ -374,8 +385,8 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
 
                 if (valType != elemType)
                 {
-                   
-                        throw std::runtime_error("Array assignment type mismatch: expected " + elemType + ", got " + valType);
+
+                    throw std::runtime_error("Array assignment type mismatch: expected " + elemType + ", got " + valType);
                 }
                 return elemType;
             }
@@ -508,38 +519,41 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
     }
 
     // IndexExpr: arr[idx]
-if (auto idx = std::dynamic_pointer_cast<IndexExpr>(expr)) {
-    std::string arrType = inferExpr(idx->array);
-    if (!isArrayType(arrType))
-        throw std::runtime_error("Indexing requires array type, got " + arrType);
+    if (auto idx = std::dynamic_pointer_cast<IndexExpr>(expr))
+    {
+        std::string arrType = inferExpr(idx->array);
+        if (!isArrayType(arrType))
+            throw std::runtime_error("Indexing requires array type, got " + arrType);
 
-    std::string idxType = inferExpr(idx->index);
-    if (!isIntType(idxType))
-        throw std::runtime_error("Array index must be int, got " + idxType);
+        std::string idxType = inferExpr(idx->index);
+        if (!isIntType(idxType))
+            throw std::runtime_error("Array index must be int, got " + idxType);
 
-    // Compile-time bounds check
-    auto symOpt = std::dynamic_pointer_cast<IdentifierExpr>(idx->array)
-                      ? env->lookup(std::dynamic_pointer_cast<IdentifierExpr>(idx->array)->name)
-                      : std::nullopt;
+        // Compile-time bounds check
+        auto symOpt = std::dynamic_pointer_cast<IdentifierExpr>(idx->array)
+                          ? env->lookup(std::dynamic_pointer_cast<IdentifierExpr>(idx->array)->name)
+                          : std::nullopt;
 
-    int arrSize = -1;
-    if (symOpt.has_value())
-        arrSize = symOpt->arraySize;
+        int arrSize = -1;
+        if (symOpt.has_value())
+            arrSize = symOpt->arraySize;
 
-    if (arrSize != -1) { // size known at compile time
-        if (auto idxLit = std::dynamic_pointer_cast<LiteralExpr>(idx->index)) {
-            int indexValue = std::stoi(idxLit->value);
-            if (indexValue < 0 || indexValue >= arrSize) {
-                throw std::runtime_error(
-                    "Array index out of bounds at compile time: " +
-                    std::to_string(indexValue) + " (array size " + std::to_string(arrSize) + ")"
-                );
+        if (arrSize != -1)
+        { // size known at compile time
+            if (auto idxLit = std::dynamic_pointer_cast<LiteralExpr>(idx->index))
+            {
+                int indexValue = std::stoi(idxLit->value);
+                if (indexValue < 0 || indexValue >= arrSize)
+                {
+                    throw std::runtime_error(
+                        "Array index out of bounds at compile time: " +
+                        std::to_string(indexValue) + " (array size " + std::to_string(arrSize) + ")");
+                }
             }
         }
-    }
 
-    return arrayElementType(arrType);
-}
+        return arrayElementType(arrType);
+    }
 
     // IfExpr (expression form)
     if (auto ie = std::dynamic_pointer_cast<IfExpr>(expr))
@@ -565,45 +579,43 @@ if (auto idx = std::dynamic_pointer_cast<IndexExpr>(expr)) {
 
     // ArrayAssignExpr (array[index] = value) - in your AST it's an Expr node
     // ArrayAssignExpr (array[index] = value)
-if (auto aa = std::dynamic_pointer_cast<ArrayAssignExpr>(expr))
-{
-    std::string arrType = inferExpr(aa->array);
-    if (!isArrayType(arrType))
-        throw std::runtime_error("Array assignment target is not array");
-
-    std::string idxType = inferExpr(aa->index);
-    if (!isIntType(idxType))
-        throw std::runtime_error("Array index must be int");
-
-    // COMPILE-TIME BOUNDS CHECK
-    if (auto arrLit = std::dynamic_pointer_cast<ArrayExpr>(aa->array))
+    if (auto aa = std::dynamic_pointer_cast<ArrayAssignExpr>(expr))
     {
-        if (auto idxLit = std::dynamic_pointer_cast<LiteralExpr>(aa->index))
+        std::string arrType = inferExpr(aa->array);
+        if (!isArrayType(arrType))
+            throw std::runtime_error("Array assignment target is not array");
+
+        std::string idxType = inferExpr(aa->index);
+        if (!isIntType(idxType))
+            throw std::runtime_error("Array index must be int");
+
+        // COMPILE-TIME BOUNDS CHECK
+        if (auto arrLit = std::dynamic_pointer_cast<ArrayExpr>(aa->array))
         {
-            int indexValue = std::stoi(idxLit->value);
-            int arrSize = static_cast<int>(arrLit->elements.size());
-            if (indexValue < 0 || indexValue >= arrSize)
+            if (auto idxLit = std::dynamic_pointer_cast<LiteralExpr>(aa->index))
             {
-                throw std::runtime_error(
-                    "Array index out of bounds at compile time: " +
-                    std::to_string(indexValue) + " (array size " + std::to_string(arrSize) + ")"
-                );
+                int indexValue = std::stoi(idxLit->value);
+                int arrSize = static_cast<int>(arrLit->elements.size());
+                if (indexValue < 0 || indexValue >= arrSize)
+                {
+                    throw std::runtime_error(
+                        "Array index out of bounds at compile time: " +
+                        std::to_string(indexValue) + " (array size " + std::to_string(arrSize) + ")");
+                }
             }
         }
+
+        // rest of type checking...
+        std::string elemType = arrayElementType(arrType);
+        std::string valType = inferExpr(aa->value);
+        if (valType != elemType)
+        {
+            if (!(isIntType(valType) && isFloatType(elemType)))
+                throw std::runtime_error("Array assignment type mismatch: expected " + elemType + ", got " + valType);
+        }
+
+        return elemType;
     }
-
-    // rest of type checking...
-    std::string elemType = arrayElementType(arrType);
-    std::string valType = inferExpr(aa->value);
-    if (valType != elemType)
-    {
-        if (!(isIntType(valType) && isFloatType(elemType)))
-            throw std::runtime_error("Array assignment type mismatch: expected " + elemType + ", got " + valType);
-    }
-
-    return elemType;
-}
-
 
     throw std::runtime_error("Unhandled expression type in typechecker");
 }

@@ -1,8 +1,16 @@
 fn main() {
 
-    var a = 10.2
-    let arr: array<array<int> > = [[1,2],[2,3]];
-    arr[1][5]
-    // arr[1] = "hello";   // should ERROR
-    //arr[0] = 1.5;         // should ERROR if strict int array
+    let x = 10; //implicit type
+    //x = 10 //error cannot assign to immutable variable 
+
+    let y:int = 10; //explicit type
+    //y = 10 //error cannot assign to immutable variable 
+
+
+    var a = 10 // should be have anythype of value
+    a = "fd" // should work 
+
+    var z:int = 10
+    z = "gdf" //should not work 
+
 }
