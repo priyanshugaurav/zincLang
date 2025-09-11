@@ -158,10 +158,18 @@ StmtPtr Parser::functionDeclaration()
         {
             Token paramName = peek();
             consume(TokenType::Identifier, "Expected parameter name.");
-            consume(TokenType::Colon, "Expected ':' after parameter name.");
 
-            // ✅ use parseType instead of forcing plain identifier
-            std::string paramType = parseType();
+            // make ':' optional: if provided, parse the type, otherwise leave empty (dynamic)
+            std::string paramType;
+            if (match({TokenType::Colon}))
+            {
+                paramType = parseType();
+            }
+            else
+            {
+                paramType = ""; // empty string => dynamic / any (handled by TypeChecker)
+            }
+
             params.emplace_back(paramName.value, paramType);
 
         } while (match({TokenType::Comma}));
@@ -169,18 +177,19 @@ StmtPtr Parser::functionDeclaration()
 
     consume(TokenType::RParen, "Expected ')' after parameters.");
 
+    // parse optional return type using parseType() to support generics/nullability
     std::string returnType;
     if (match({TokenType::Colon}))
     {
-        Token ret = peek();
-        consume(TokenType::Identifier, "Expected return type.");
-        returnType = ret.value;
+        returnType = parseType();
     }
 
     StmtPtr body = blockStatement();
     return std::make_shared<FuncDecl>(name.value, params, body, returnType);
 }
-// -------------------
+
+
+
 // Statements
 // -------------------
 StmtPtr Parser::statement()

@@ -22,6 +22,9 @@ private:
     // current function return type when traversing a function body
     // empty string means 'void' / unspecified
     std::string currentReturnType;
+    bool sawReturn = false;
+    bool checkFunctionBody(const StmtPtr &body, const std::string &expectedRet);
+
 
     // Helpers
     void checkStmt(const StmtPtr &stmt);

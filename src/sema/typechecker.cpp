@@ -148,15 +148,27 @@ void TypeChecker::checkStmt(const StmtPtr &stmt)
     }
 
     // ReturnStmt
+    // ReturnStmt
     if (auto r = std::dynamic_pointer_cast<ReturnStmt>(stmt))
     {
         if (r->value)
         {
             std::string t = inferExpr(r->value);
+
+            // If currentReturnType is empty (no enclosing function) -> error
+            // If currentReturnType == "any" (function had no declared return type) -> allow any return type
             if (currentReturnType.empty())
             {
                 throw std::runtime_error("Return with value in a function declared void / no return type");
             }
+
+            if (currentReturnType == "any")
+            {
+                // function was declared without a return type -> allow any return type
+                return;
+            }
+
+            // Otherwise enforce strict equality
             if (t != currentReturnType)
             {
                 throw std::runtime_error("Return type mismatch: expected " + currentReturnType + ", got " + t);
@@ -164,7 +176,9 @@ void TypeChecker::checkStmt(const StmtPtr &stmt)
         }
         else
         {
-            if (!currentReturnType.empty())
+            // return without value
+            // allowed if function explicitly expects void, or function declared as "any" (treating unspecified as permissive)
+            if (!currentReturnType.empty() && currentReturnType != "void" && currentReturnType != "any")
             {
                 throw std::runtime_error("Return without value in function that expects type " + currentReturnType);
             }
@@ -242,6 +256,7 @@ void TypeChecker::checkStmt(const StmtPtr &stmt)
     }
 
     // FuncDecl
+    // FuncDecl
     if (auto fn = std::dynamic_pointer_cast<FuncDecl>(stmt))
     {
         // build function type string for storage e.g. fn(int,int)->int
@@ -251,13 +266,16 @@ void TypeChecker::checkStmt(const StmtPtr &stmt)
         {
             if (i)
                 sig << ",";
-            sig << fn->params[i].second;
+            // if param type not specified -> treat as "any"
+            std::string ptype = fn->params[i].second.empty() ? "any" : fn->params[i].second;
+            sig << ptype;
         }
         sig << ")->";
-        std::string retType = fn->returnType.empty() ? "" : fn->returnType;
+        // if return type not specified -> use "any" (meaning dynamic)
+        std::string retType = fn->returnType.empty() ? "any" : fn->returnType;
         sig << (retType.empty() ? "void" : retType);
 
-        // define function symbol in current env (so functions are first-class referencable)
+        // define function symbol in current env (so functions are first-class and recursion works)
         if (!env->define(fn->name, sig.str(), false))
         {
             throw std::runtime_error("Function already defined: " + fn->name);
@@ -267,39 +285,60 @@ void TypeChecker::checkStmt(const StmtPtr &stmt)
         auto oldEnv = env;
         env = std::make_shared<Environment>(oldEnv);
 
-        // define params
+        // define params (use "any" for missing param types)
         for (auto &p : fn->params)
         {
             const std::string &pname = p.first;
-            const std::string &ptype = p.second;
+            const std::string ptype = p.second.empty() ? "any" : p.second;
             if (!env->define(pname, ptype, false))
             {
                 throw std::runtime_error("Parameter name already used in function '" + fn->name + "': " + pname);
             }
         }
 
-        // set current return type
-        std::string oldReturn = currentReturnType;
-        currentReturnType = retType;
+        // set current return type; for unspecified returns we set "any" (per above)
+         std::string oldReturn = currentReturnType;
+    currentReturnType = retType;
 
-        // body should be a BlockStmt normally
-        if (auto bodyBlock = std::dynamic_pointer_cast<BlockStmt>(fn->body))
-        {
-            checkBlock(bodyBlock->statements);
-        }
-        else
-        {
-            // single-statement function bodies (not typical) - check directly
-            checkStmt(fn->body);
-        }
+    bool foundReturn = checkFunctionBody(fn->body, retType);
 
-        currentReturnType = oldReturn;
-        env = oldEnv;
-        return;
+    // enforce compulsory return if explicit return type
+    if (retType != "any" && retType != "void" && !foundReturn) {
+        throw std::runtime_error("Function '" + fn->name +
+            "' with return type '" + retType + "' must return a value on all paths");
+    }
+
+    currentReturnType = oldReturn;
+    env = oldEnv;
+    return;
     }
 
     // Unknown statement
     throw std::runtime_error("Unhandled statement in typechecker");
+}
+
+bool TypeChecker::checkFunctionBody(const StmtPtr &body, const std::string &expectedRet) {
+    if (auto block = std::dynamic_pointer_cast<BlockStmt>(body)) {
+        bool found = false;
+        for (auto &s : block->statements) {
+            if (auto r = std::dynamic_pointer_cast<ReturnStmt>(s)) {
+                found = true;
+                checkStmt(s); // still typecheck it
+            } else {
+                // keep scanning
+                checkStmt(s);
+            }
+        }
+        return found;
+    } else {
+        // single stmt body
+        if (std::dynamic_pointer_cast<ReturnStmt>(body)) {
+            checkStmt(body);
+            return true;
+        }
+        checkStmt(body);
+        return false;
+    }
 }
 
 // ---------------------------
@@ -350,43 +389,94 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
     }
 
     // Binary
-    if (auto bin = std::dynamic_pointer_cast<BinaryExpr>(expr)) {
-    // assignment operator
-    if (bin->op == "=") {
-        std::string valType = inferExpr(bin->rhs);
+    if (auto bin = std::dynamic_pointer_cast<BinaryExpr>(expr))
+    {
+        // assignment operator handled here: lhs must be identifier
+        if (bin->op == "=")
+        {
+            std::string valType = inferExpr(bin->rhs);
 
-        auto lhsId = std::dynamic_pointer_cast<IdentifierExpr>(bin->lhs);
-        if (!lhsId)
-            throw std::runtime_error("Invalid assignment target");
+            auto lhsId = std::dynamic_pointer_cast<IdentifierExpr>(bin->lhs);
+            if (!lhsId)
+                throw std::runtime_error("Invalid assignment target");
 
-        auto symOpt = env->lookup(lhsId->name);
-        if (!symOpt.has_value())
-            throw std::runtime_error("Assignment to undefined variable: " + lhsId->name);
+            auto symOpt = env->lookup(lhsId->name);
+            if (!symOpt.has_value())
+                throw std::runtime_error("Assignment to undefined variable: " + lhsId->name);
 
-        if (!symOpt->isMutable)
-            throw std::runtime_error("Cannot assign to immutable variable (let): " + lhsId->name);
+            // immutability check
+            if (!symOpt->isMutable)
+                throw std::runtime_error("Cannot assign to immutable variable (let): " + lhsId->name);
 
-        // nullability check
-        if (valType == "null") {
-            if (!symOpt->isNullable)
-                throw std::runtime_error("Cannot assign null to non-nullable variable '" + lhsId->name + "'");
+            // null check
+            if (valType == "null")
+            {
+                if (!symOpt->isNullable)
+                    throw std::runtime_error("Cannot assign null to non-nullable variable '" + lhsId->name + "'");
+                return symOpt->type;
+            }
+
+            // strict type check
+            if (!symOpt->isDynamic && valType != symOpt->type)
+            {
+                // allow int -> float widening
+                // if (!(isIntType(valType) && isFloatType(symOpt->type)))
+                {
+                    throw std::runtime_error("Assignment type mismatch for '" + lhsId->name +
+                                             "': expected " + symOpt->type + ", got " + valType);
+                }
+            }
+
+            // dynamic variable: update type
+            if (symOpt->isDynamic)
+                symOpt->type = valType;
+
             return symOpt->type;
         }
 
-        // strict type check
-        if (!symOpt->isDynamic && valType != symOpt->type) {
-            throw std::runtime_error("Assignment type mismatch for '" + lhsId->name +
-                                     "': expected " + symOpt->type + ", got " + valType);
+        {
+            std::string valType = inferExpr(bin->rhs);
+
+            if (auto lhsId = std::dynamic_pointer_cast<IdentifierExpr>(bin->lhs))
+            {
+                auto symOpt = env->lookup(lhsId->name);
+                if (!symOpt.has_value())
+                    throw std::runtime_error("Assignment to undefined variable: " + lhsId->name);
+
+                if (!symOpt->isMutable)
+                    throw std::runtime_error("Cannot assign to immutable variable (let): " + lhsId->name);
+
+                // Nullability
+                if (valType == "null")
+                {
+                    if (!symOpt->isNullable)
+                        throw std::runtime_error("Cannot assign null to non-nullable variable '" + lhsId->name + "'");
+                    return symOpt->type;
+                }
+
+                // Dynamic vars: type update
+                if (symOpt->isDynamic)
+                {
+                    symOpt->type = valType;
+                    return symOpt->type;
+                }
+
+                // Strict vars: type must match (int->float widening allowed)
+                if (valType != symOpt->type)
+                {
+                    // if (!(isIntType(valType) && isFloatType(symOpt->type)))
+                    throw std::runtime_error("Assignment type mismatch for '" + lhsId->name +
+                                             "': expected " + symOpt->type + ", got " + valType);
+                }
+
+                return symOpt->type;
+            }
+
+            throw std::runtime_error("Invalid assignment target");
         }
 
-        // dynamic update
-        if (symOpt->isDynamic)
-            symOpt->type = valType;
-
-        return symOpt->type;
-    }
-    // -------- else, arithmetic / comparison / logical ops --------
-    const std::string &op = bin->op;
+        // arithmetic ops
+        const std::string &op = bin->op;
         if (op == "+" || op == "-" || op == "*" || op == "/" || op == "%")
         {
             std::string L = inferExpr(bin->lhs);

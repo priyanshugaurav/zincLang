@@ -1,0 +1,9 @@
+fn main(){
+    let a = 20
+    fn add (a:int , b):int{
+        return 10
+    }
+
+    add(10,"10")
+    print(a)
+}
