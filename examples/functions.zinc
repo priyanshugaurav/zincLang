@@ -4,6 +4,11 @@
             print(10)
         }
 
+        fn add1(a:int){
+            return "1"
+        }
+
         add(1)
+        add1(1)
         print(a)
     }

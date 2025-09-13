@@ -18,10 +18,14 @@ public:
     bool isStringType(const std::string &t) const;
     bool isArrayType(const std::string &t) const;
     std::string arrayElementType(const std::string &arrayType) const;
+    std::string inferIndexedType(const ExprPtr &arrayExpr, int levels) ;
     bool isAnyType(const std::string &t) const;
 
     // 🔥 Add this declaration
     bool isArrayCompatible(const std::string &declared, const std::string &inferred) const;
+    bool isAssignable(const std::string &from, const std::string &to) const;
+    bool isNullableType(const std::string& t) const ;
+    std::string getArrayElementType(const ExprPtr &expr);
 
     // ---------------------------
     void check(const StmtPtr &program);

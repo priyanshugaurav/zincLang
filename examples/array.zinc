@@ -1,71 +1,42 @@
 fn main() {
-    let c = [1,2,3,4,5,9]   //should be dynamic with contant as declared with let nad should be initialized at declaration as immutable 
-    let g:int[3][2] = [  //multidimension with fixed size
-        [1,2],
-        [3,4],
-        [1,2]
-    ]
-    let d:int[] = [1,2,34,4] //strict type
-    let e:int[2] = [1,2] //fixed size
+// 1 - numeric unify
+var a = [1, 2.0, 3]; // => array<float>
 
-    //multidimension
-    let f = [[1,2],[3,4] , [4,5,6]] //dimension not fixed can be anything
+// 2 - heterogeneous -> any
+var b = [1,"s",3]; // => array<any>
 
-      let h:int[][] = [  //multidimension with auto sizing
-        [1,2,3],
-        [1,2,3],
-        [2,3,4]
-    ]
+// 3 - empty default
+var c = []; // => array<any>
 
+// 4 - typed widen (non-strict)
+var d: array<int> = [1, "x"]; // => allowed, variable type becomes array<any>
 
+// 5 - strict error
+var e: strict array<int> = [1, "x"]; // => Type Error
 
-    //for vars not necesarily initialized at same line and is mutable
+// 6 - nullable element inference
+var f = [null, 1]; // => array<int?>
 
-    var i = [1,2.2,"fs"]  //any type and is mutable
-    var j:int[] = [1,2,3] //should be strict type
-    var k:int[][] = [     //should be dyanmic sizing
-        [1,2,3],
-        [1,2,3],
-        [2,3,4]
-    ]
-    var l:int[2][2] = [  //fixed sizing but mutable
-        [1,2],
-        [2,3]
-    ]
+// 7 - assign null to nullable element
+var g: array<int?> = [1,2];
+g[1] = null; // OK
 
-    var y;
-    y = 10
+// 8 - assign null to non-nullable element
+var h: array<int> = [1,2];
+h[1] = null; // Type Error
 
-    var m:int[3][2];  //fixed col sizing but row can be dynamic and nullable
-    m = [
-        [1,2],
-        [2,3],
-        [4,5]
-    ]
+// 9 - nested nullable assign (your failing case)
+var i: array<array<float?>?>;
+i[0] = null; // OK after patch
+i[0] = [1.1, null, 2.2]; // OK
+i[1][11] = 3.3; // Compile-time Type Error: i[1] is nullable
 
+// 10 - index out of bounds (compile-time)
+var j = [1,2,3];
+j[3] = 4; // Compile-time error
 
+// 11 - let immutable
+let k = [1,2];
+k = [1]; // Error: cannot assign to let
 
-
-    //accessing 
-
-    a[2] //second index
-    a[-1] //last index
-    a[1][2] //for multi dimension
-
-    //change/reinitalization only for var as they are mutable
-
-    a[2] = 10 //should perform type checking if strictly typed
-    a[1][3] = 30 //same for multidimension should check if strictly typed
-
-
-      var z:int?[?][?]; //both row and col is dynamic and nullable
-    z = [
-        [1,2,null],
-        [null,2,3]
-    ]
-
-
-    //multidimension can be 3d , 4d ,5d and so on .....
-
-  
 }

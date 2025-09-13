@@ -10,17 +10,19 @@
 // ----------------------------
 struct Symbol {
     std::string name;
-    std::string type;   // e.g., "array<int>"
-    std::string value;  // optional
-    int arraySize = -1; // -1 = unknown
+    std::string type;       // e.g., "array<int>"
+    std::string elementType; // store inner type for homogeneous arrays
+    std::string value;      // optional
+    int arraySize = -1;     // -1 = unknown
     bool isMutable;
     bool isDynamic = false;
-    bool isNullable = false; // <-- new
+    bool isNullable = false;
 
     Symbol() : name(""), type(""), arraySize(-1), isMutable(false), isDynamic(false), isNullable(false) {}
     Symbol(const std::string &n, const std::string &t, bool mut, int arrSize = -1, bool dyn = false, bool nullable = false)
-        : name(n), type(t), arraySize(arrSize), isMutable(mut), isDynamic(dyn), isNullable(nullable) {}
+        : name(n), type(t), elementType(""), arraySize(arrSize), isMutable(mut), isDynamic(dyn), isNullable(nullable) {}
 };
+
 
 
 

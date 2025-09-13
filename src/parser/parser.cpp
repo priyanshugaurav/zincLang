@@ -101,24 +101,26 @@ StmtPtr Parser::declaration()
 // simple prototype
 std::string Parser::parseType()
 {
-    Token name = peek();
     consume(TokenType::Identifier, "Expected type name");
-    std::string typeStr = name.value;
+    std::string typeName = previous().value;
 
+    // Check for generic: e.g., array<...>
     if (match({TokenType::Less}))
-    { // array<int>
-        typeStr += "<" + parseType() + ">";
-        consume(TokenType::Greater, "Expected '>' after generic type");
-    }
-
-    // handle nullable (int?)
-    if (match({TokenType::Question}))
     {
-        typeStr += "?";
+        std::string innerType = parseType();  // recursively parse
+        consume(TokenType::Greater, "Expected '>' after generic type");
+        typeName += "<" + innerType + ">";
     }
 
-    return typeStr;
+    // Check for nullable type: e.g., float?
+    while (match({TokenType::Question}))
+    {
+        typeName += "?";
+    }
+
+    return typeName;
 }
+
 
 StmtPtr Parser::varDeclaration()
 {

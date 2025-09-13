@@ -4,16 +4,21 @@
 Environment::Environment(std::shared_ptr<Environment> parentEnv)
     : parent(std::move(parentEnv)) {}
 
-bool Environment::define(const std::string &name,
-                         const std::string &type,
-                         bool isMutable,
-                         int arraySize,
-                         bool isDynamic,
-                         bool isNullable) {
-    if (table.find(name) != table.end()) {
-        throw std::runtime_error("Variable '" + name + "' already defined in this scope");
+bool Environment::define(const std::string &name, const std::string &type, bool isMutable,
+                         int arraySize, bool dyn, bool nullable)
+{
+    if (table.count(name)) return false;
+
+    Symbol sym{name, type, isMutable};
+    sym.isDynamic = dyn;
+    sym.isNullable = nullable;
+    sym.arraySize = arraySize;
+
+    if (type.rfind("array<", 0) == 0 && type.back() == '>') {
+        sym.elementType = type.substr(6, type.size() - 7); // array<int> -> int
     }
-    table.emplace(name, Symbol{name, type, isMutable, arraySize, isDynamic, isNullable});
+
+    table[name] = sym;
     return true;
 }
 

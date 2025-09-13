@@ -35,31 +35,49 @@ std::string TypeChecker::arrayElementType(const std::string &arrayType) const
     return arrayType.substr(6, arrayType.size() - 7);
 }
 
-bool TypeChecker::isAnyType(const std::string &t) const 
-{ 
-    return t == "any"; 
+bool TypeChecker::isAnyType(const std::string &t) const
+{
+    return t == "any";
 }
 
-bool TypeChecker::isArrayCompatible(const std::string &declared, const std::string &inferred) const {
+bool TypeChecker::isNullableType(const std::string &t) const
+{
+    return !t.empty() && t.back() == '?';
+}
+
+bool TypeChecker::isArrayCompatible(const std::string &declared, const std::string &inferred) const
+{
     if (declared == inferred)
         return true;
 
-    // e.g. array<array<int>> vs array<any>
-    if (isArrayType(declared) && isArrayType(inferred)) {
+    if (isArrayType(declared) && isArrayType(inferred))
+    {
         std::string dElem = arrayElementType(declared);
         std::string iElem = arrayElementType(inferred);
 
-        // allow widening only if declared is any
-        if (dElem == "any")
+        // Allow widening: inferred elem is T, declared is T?
+        if (!dElem.empty() && dElem.back() == '?' && dElem.substr(0, dElem.size() - 1) == iElem)
             return true;
 
+        // recursive check (for nested arrays etc.)
         return isArrayCompatible(dElem, iElem);
     }
 
-    // final fallback: no match
     return false;
 }
 
+// Helper: recursively get element type for N-level indexing
+std::string TypeChecker::inferIndexedType(const ExprPtr &arrayExpr, int levels)
+{
+    std::string t = inferExpr(arrayExpr);
+    for (int i = 0; i < levels; i++)
+    {
+        if (!isArrayType(t))
+            return "any"; // dynamic fallback
+        t = arrayElementType(t);
+    }
+    return t;
+}
 
 // ---------------------------
 // Top-level check
@@ -91,8 +109,37 @@ void TypeChecker::checkBlock(const std::vector<StmtPtr> &stmts)
 
     env = oldEnv;
 }
+bool TypeChecker::isAssignable(const std::string &from, const std::string &to) const
+{
+    if (from == to)
+        return true;
 
+    // Null can be assigned to any nullable type (including arrays)
+    if (from == "null" && isNullableType(to))
+        return true;
 
+    // int -> float
+    if (from == "int" && to == "float")
+        return true;
+
+    // int -> float?
+    if (from == "int" && to == "float?")
+        return true;
+
+    // float -> float?
+    if (from == "float" && to == "float?")
+        return true;
+
+    // T -> T? (widening for any type)
+    if (to.size() > 1 && to.back() == '?' && from == to.substr(0, to.size() - 1))
+        return true;
+
+    // Arrays: recursive compatibility
+    if (isArrayCompatible(to, from))
+        return true;
+
+    return false;
+}
 
 // ---------------------------
 // Statements
@@ -115,7 +162,9 @@ void TypeChecker::checkStmt(const StmtPtr &stmt)
             nullable = true;
             baseType.pop_back(); // remove '?'
         }
-        if (!baseType.empty() && !nullable && !v->initializer)
+        bool isArrayOfNullable = isArrayType(baseType) && arrayElementType(baseType).back() == '?';
+
+        if (!baseType.empty() && !nullable && !isArrayOfNullable && !v->initializer)
         {
             throw std::runtime_error("Variable '" + v->name + "' of non-nullable type '" + baseType + "' must be initialized at declaration");
         }
@@ -155,7 +204,30 @@ void TypeChecker::checkStmt(const StmtPtr &stmt)
 
             // If dynamic, update type to initializer type
             if (isDynamic)
-                baseType = initType;
+            {
+                // For arrays, keep as array<any> if elements might widen
+                if (isArrayType(initType))
+                {
+                    // Check if numeric: int → float possible
+                    std::string elemType = arrayElementType(initType);
+                    if (elemType == "int")
+                    {
+                        baseType = "array<float>"; // allow numeric widening
+                    }
+                    else if (elemType != "any")
+                    {
+                        baseType = "array<any>"; // heterogeneous fallback
+                    }
+                    else
+                    {
+                        baseType = initType; // array<any>
+                    }
+                }
+                else
+                {
+                    baseType = initType;
+                }
+            }
         }
 
         // define variable in environment
@@ -176,9 +248,9 @@ void TypeChecker::checkStmt(const StmtPtr &stmt)
     }
 
     // ReturnStmt
-// ---------------------------
-// Statements
-// ---------------------------
+    // ---------------------------
+    // Statements
+    // ---------------------------
 
     // ReturnStmt
     if (auto r = std::dynamic_pointer_cast<ReturnStmt>(stmt))
@@ -429,115 +501,128 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
     }
 
     // Binary
-if (auto bin = std::dynamic_pointer_cast<BinaryExpr>(expr)) {
-    const std::string &op = bin->op;
+    if (auto bin = std::dynamic_pointer_cast<BinaryExpr>(expr))
+    {
+        const std::string &op = bin->op;
 
-    // ---------------- ASSIGNMENT (=) ----------------
-    if (op == "=") {
-        auto lhsId = std::dynamic_pointer_cast<IdentifierExpr>(bin->lhs);
-        if (!lhsId)
-            throw std::runtime_error("Invalid assignment target");
+        // ---------------- ASSIGNMENT (=) ----------------
+        if (op == "=")
+        {
+            auto lhsId = std::dynamic_pointer_cast<IdentifierExpr>(bin->lhs);
+            if (!lhsId)
+                throw std::runtime_error("Invalid assignment target");
 
-        std::string rhsType = inferExpr(bin->rhs);
-        auto symOpt = env->lookup(lhsId->name);
-        if (!symOpt.has_value())
-            throw std::runtime_error("Assignment to undefined variable: " + lhsId->name);
+            std::string rhsType = inferExpr(bin->rhs);
+            auto symOpt = env->lookup(lhsId->name);
+            if (!symOpt.has_value())
+                throw std::runtime_error("Assignment to undefined variable: " + lhsId->name);
 
-        if (!symOpt->isMutable)
-            throw std::runtime_error("Cannot assign to immutable variable (let): " + lhsId->name);
+            if (!symOpt->isMutable)
+                throw std::runtime_error("Cannot assign to immutable variable (let): " + lhsId->name);
 
-        // Null check
-        if (rhsType == "null") {
-            if (!symOpt->isNullable)
-                throw std::runtime_error("Cannot assign null to non-nullable variable '" + lhsId->name + "'");
-            return symOpt->type; // keep declared type
-        }
+            // Null check
+            if (rhsType == "null")
+            {
+                if (!symOpt->isNullable)
+                    throw std::runtime_error("Cannot assign null to non-nullable variable '" + lhsId->name + "'");
+                return symOpt->type; // keep declared type
+            }
 
-        // Dynamic vars → update type
-        if (symOpt->isDynamic) {
-            symOpt->type = rhsType;
+            // Dynamic vars → update type
+            if (symOpt->isDynamic)
+            {
+                symOpt->type = rhsType;
+                return symOpt->type;
+            }
+
+            // Type check
+            if (rhsType != symOpt->type)
+            {
+                if (!(isIntType(rhsType) && isFloatType(symOpt->type)) &&
+                    !isArrayCompatible(symOpt->type, rhsType))
+                {
+                    throw std::runtime_error("Assignment type mismatch for '" + lhsId->name +
+                                             "': expected " + symOpt->type + ", got " + rhsType);
+                }
+            }
+
             return symOpt->type;
         }
 
-        // Type check
-        if (rhsType != symOpt->type) {
-            // allow int → float widening
-            if (!(isIntType(rhsType) && isFloatType(symOpt->type))) {
-                throw std::runtime_error("Assignment type mismatch for '" + lhsId->name +
-                                         "': expected " + symOpt->type + ", got " + rhsType);
-            }
+        // ---------------- ARITHMETIC ----------------
+        if (op == "+" || op == "-" || op == "*" || op == "/" || op == "%")
+        {
+            std::string L = inferExpr(bin->lhs);
+            std::string R = inferExpr(bin->rhs);
+
+            if (op == "+" && isStringType(L) && isStringType(R))
+                return "string";
+
+            if (!isNumericType(L) || !isNumericType(R))
+                throw std::runtime_error("Arithmetic requires numeric operands");
+
+            return (isFloatType(L) || isFloatType(R)) ? "float" : "int";
         }
 
-        return symOpt->type;
+        // ---------------- COMPARISONS ----------------
+        if (op == "==" || op == "!=")
+        {
+            std::string L = inferExpr(bin->lhs);
+            std::string R = inferExpr(bin->rhs);
+
+            if (L != R && !(isNumericType(L) && isNumericType(R)))
+                throw std::runtime_error("Comparison requires same or compatible types, got " + L + " and " + R);
+
+            return "bool";
+        }
+
+        if (op == "<" || op == "<=" || op == ">" || op == ">=")
+        {
+            std::string L = inferExpr(bin->lhs);
+            std::string R = inferExpr(bin->rhs);
+
+            if (!isNumericType(L) || !isNumericType(R))
+                throw std::runtime_error("Comparison requires numeric types, got " + L + " and " + R);
+
+            return "bool";
+        }
+
+        // ---------------- LOGICAL ----------------
+        if (op == "&&" || op == "||")
+        {
+            std::string L = inferExpr(bin->lhs);
+            std::string R = inferExpr(bin->rhs);
+
+            if (!isBoolType(L) || !isBoolType(R))
+                throw std::runtime_error("Logical operators require bool operands");
+
+            return "bool";
+        }
+
+        throw std::runtime_error("Unknown or unsupported binary operator: " + op);
     }
 
-    // ---------------- ARITHMETIC ----------------
-    if (op == "+" || op == "-" || op == "*" || op == "/" || op == "%") {
-        std::string L = inferExpr(bin->lhs);
-        std::string R = inferExpr(bin->rhs);
+    // ---------------- UNARY ----------------
+    if (auto u = std::dynamic_pointer_cast<UnaryExpr>(expr))
+    {
+        std::string operandType = inferExpr(u->rhs);
 
-        if (op == "+" && isStringType(L) && isStringType(R))
-            return "string";
+        if (u->op == "-")
+        {
+            if (!isNumericType(operandType))
+                throw std::runtime_error("Unary - requires numeric type, got " + operandType);
+            return operandType;
+        }
 
-        if (!isNumericType(L) || !isNumericType(R))
-            throw std::runtime_error("Arithmetic requires numeric operands");
+        if (u->op == "!")
+        {
+            if (operandType != "bool")
+                throw std::runtime_error("Unary ! requires bool type, got " + operandType);
+            return "bool";
+        }
 
-        return (isFloatType(L) || isFloatType(R)) ? "float" : "int";
+        throw std::runtime_error("Unsupported unary operator: " + u->op);
     }
-
-    // ---------------- COMPARISONS ----------------
-    if (op == "==" || op == "!=") {
-        std::string L = inferExpr(bin->lhs);
-        std::string R = inferExpr(bin->rhs);
-
-        if (L != R && !(isNumericType(L) && isNumericType(R)))
-            throw std::runtime_error("Comparison requires same or compatible types, got " + L + " and " + R);
-
-        return "bool";
-    }
-
-    if (op == "<" || op == "<=" || op == ">" || op == ">=") {
-        std::string L = inferExpr(bin->lhs);
-        std::string R = inferExpr(bin->rhs);
-
-        if (!isNumericType(L) || !isNumericType(R))
-            throw std::runtime_error("Comparison requires numeric types, got " + L + " and " + R);
-
-        return "bool";
-    }
-
-    // ---------------- LOGICAL ----------------
-    if (op == "&&" || op == "||") {
-        std::string L = inferExpr(bin->lhs);
-        std::string R = inferExpr(bin->rhs);
-
-        if (!isBoolType(L) || !isBoolType(R))
-            throw std::runtime_error("Logical operators require bool operands");
-
-        return "bool";
-    }
-
-    throw std::runtime_error("Unknown or unsupported binary operator: " + op);
-}
-
-// ---------------- UNARY ----------------
-if (auto u = std::dynamic_pointer_cast<UnaryExpr>(expr)) {
-    std::string operandType = inferExpr(u->rhs);
-
-    if (u->op == "-") {
-        if (!isNumericType(operandType))
-            throw std::runtime_error("Unary - requires numeric type, got " + operandType);
-        return operandType;
-    }
-
-    if (u->op == "!") {
-        if (operandType != "bool")
-            throw std::runtime_error("Unary ! requires bool type, got " + operandType);
-        return "bool";
-    }
-
-    throw std::runtime_error("Unsupported unary operator: " + u->op);
-}
 
     // CallExpr
     // CallExpr
@@ -593,60 +678,28 @@ if (auto u = std::dynamic_pointer_cast<UnaryExpr>(expr)) {
         return retStr;
     }
 
-    // ArrayExpr
-    // if (auto a = std::dynamic_pointer_cast<ArrayExpr>(expr))
-    // {
-    //     if (a->elements.empty())
-    //     {
-    //         throw std::runtime_error("Empty array literal requires explicit type annotation in MVP");
-    //     }
-    //     std::string firstType = inferExpr(a->elements[0]);
-    //     for (size_t i = 1; i < a->elements.size(); ++i)
-    //     {
-    //         std::string t = inferExpr(a->elements[i]);
-    //         if (t != firstType)
-    //         {
-    //             throw std::runtime_error("Array literal elements must be homogeneous: " + firstType + " vs " + t);
-    //         }
-    //     }
-    //     return "array<" + firstType + ">";
-    // }
-
     // IndexExpr: arr[idx]
-    if (auto idx = std::dynamic_pointer_cast<IndexExpr>(expr))
+    else if (auto ie = std::dynamic_pointer_cast<IndexExpr>(expr))
     {
-        std::string arrType = inferExpr(idx->array);
-        if (!isArrayType(arrType))
-            throw std::runtime_error("Indexing requires array type, got " + arrType);
+        std::string arrType = inferExpr(ie->array);
 
-        std::string idxType = inferExpr(idx->index);
-        if (!isIntType(idxType))
-            throw std::runtime_error("Array index must be int, got " + idxType);
-
-        // Compile-time bounds check
-        auto symOpt = std::dynamic_pointer_cast<IdentifierExpr>(idx->array)
-                          ? env->lookup(std::dynamic_pointer_cast<IdentifierExpr>(idx->array)->name)
-                          : std::nullopt;
-
-        int arrSize = -1;
-        if (symOpt.has_value())
-            arrSize = symOpt->arraySize;
-
-        if (arrSize != -1)
-        { // size known at compile time
-            if (auto idxLit = std::dynamic_pointer_cast<LiteralExpr>(idx->index))
-            {
-                int indexValue = std::stoi(idxLit->value);
-                if (indexValue < 0 || indexValue >= arrSize)
-                {
-                    throw std::runtime_error(
-                        "Array index out of bounds at compile time: " +
-                        std::to_string(indexValue) + " (array size " + std::to_string(arrSize) + ")");
-                }
-            }
+        if (isNullableType(arrType))
+        {
+            throw std::runtime_error("Cannot index into nullable array: " + arrType);
         }
 
-        return arrayElementType(arrType);
+        if (!isArrayType(arrType))
+        {
+            throw std::runtime_error("Attempting to index a non-array type: " + arrType);
+        }
+
+        std::string indexType = inferExpr(ie->index);
+        if (!isIntType(indexType))
+        {
+            throw std::runtime_error("Array index must be int, got " + indexType);
+        }
+
+        return arrayElementType(arrType); // Strip one layer of array
     }
 
     // IfExpr (expression form)
@@ -671,129 +724,99 @@ if (auto u = std::dynamic_pointer_cast<UnaryExpr>(expr)) {
         return thenT;
     }
 
-
-
-
     // ArrayAssignExpr (array[index] = value) - in your AST it's an Expr node
-// ArrayExpr
-
-if (auto aa = std::dynamic_pointer_cast<ArrayAssignExpr>(expr))
-{
-    std::string arrType = inferExpr(aa->array);
-    if (!isArrayType(arrType))
-        throw std::runtime_error("Array assignment target is not array");
-
-    // CHECK MUTABILITY
-    if (auto arrId = std::dynamic_pointer_cast<IdentifierExpr>(aa->array))
+    else if (auto aa = std::dynamic_pointer_cast<ArrayAssignExpr>(expr))
     {
-        auto symOpt = env->lookup(arrId->name);
-        if (!symOpt.has_value())
-            throw std::runtime_error("Array variable not found: " + arrId->name);
-            
-        if (!symOpt->isMutable)
-            throw std::runtime_error("Cannot assign to immutable array (let): " + arrId->name);
-    }
+        std::string arrType = inferExpr(aa->array);
+        std::string valType = inferExpr(aa->value);
 
-    std::string idxType = inferExpr(aa->index);
-    if (!isIntType(idxType))
-        throw std::runtime_error("Array index must be int");
+        if (isNullableType(arrType))
+            arrType = arrType.substr(0, arrType.size() - 1);
 
-    // COMPILE-TIME BOUNDS CHECK
-    if (auto arrLit = std::dynamic_pointer_cast<ArrayExpr>(aa->array))
-    {
-        if (auto idxLit = std::dynamic_pointer_cast<LiteralExpr>(aa->index))
+        if (!isArrayType(arrType))
+            throw std::runtime_error("Array assignment target is not array, got " + arrType);
+
+        std::string elemType = arrayElementType(arrType);
+
+        // Dynamic element type widening
+        if (auto arrayId = std::dynamic_pointer_cast<IdentifierExpr>(aa->array))
         {
-            int indexValue = std::stoi(idxLit->value);
-            int arrSize = static_cast<int>(arrLit->elements.size());
-            if (indexValue < 0 || indexValue >= arrSize)
+            auto symOpt = env->lookup(arrayId->name);
+            if (symOpt.has_value())
             {
-                throw std::runtime_error(
-                    "Array index out of bounds at compile time: " +
-                    std::to_string(indexValue) + " (array size " + std::to_string(arrSize) + ")");
+                if (!symOpt->isMutable)
+                    throw std::runtime_error("Cannot assign to element of immutable array (let): " + arrayId->name);
+                std::string newElemType = elemType;
+
+                // int -> float widening
+                if (isIntType(valType) && isFloatType(elemType))
+                    newElemType = "float";
+
+                // If incompatible (like assigning array<int> into float), fallback to any
+                else if (!isAssignable(valType, elemType))
+                    newElemType = "any";
+
+                symOpt->type = "array<" + newElemType + ">";
+                return newElemType;
             }
         }
-    }
 
-    // Type checking for assignment
-    std::string elemType = arrayElementType(arrType);
-    std::string valType = inferExpr(aa->value);
-    
-    // If array element type is "any", allow any assignment
-    if (isAnyType(elemType))
-    {
-        return valType;  // Return the actual assigned type
-    }
-    
-    // Otherwise, enforce type compatibility
-    if (valType != elemType)
-    {
-        if (!(isIntType(valType) && isFloatType(elemType)))
+        // Static arrays: check assignability
+        if (!isAssignable(valType, elemType))
             throw std::runtime_error("Array assignment type mismatch: expected " + elemType + ", got " + valType);
+
+        return elemType;
     }
 
-    return elemType;
-}
-
-// ArrayExpr - Updated to handle dynamic/heterogeneous arrays
-// ArrayExpr - Updated to handle dynamic/heterogeneous arrays
-if (auto a = std::dynamic_pointer_cast<ArrayExpr>(expr))
-{
-    if (a->elements.empty())
+    // ArrayExpr - Updated to handle dynamic/heterogeneous arrays
+    if (auto a = std::dynamic_pointer_cast<ArrayExpr>(expr))
     {
-        throw std::runtime_error("Empty array literal requires explicit type annotation");
-    }
-
-    std::vector<std::string> elementTypes;
-    for (auto& elem : a->elements)
-    {
-        elementTypes.push_back(inferExpr(elem));
-    }
-    
-    // Check if all elements are the same type
-    std::string firstType = elementTypes[0];
-    bool allSameType = true;
-    
-    for (size_t i = 1; i < elementTypes.size(); ++i)
-    {
-        if (elementTypes[i] != firstType)
+        if (a->elements.empty())
         {
-            allSameType = false;
-            break;
+            return "array<any>"; // empty dynamic array
         }
-    }
-    
-    if (allSameType)
-    {
-        return "array<" + firstType + ">";
-    }
-    
-    // Check if all types are numeric (can be unified to float)
-    bool allNumeric = true;
-    bool hasFloat = false;
-    
-    for (const auto& type : elementTypes)
-    {
-        if (!isNumericType(type))
-        {
-            allNumeric = false;
-            break;
-        }
-        if (isFloatType(type))
-        {
-            hasFloat = true;
-        }
-    }
-    
-    // If all numeric, unify to appropriate numeric type
-    if (allNumeric)
-    {
-        return hasFloat ? "array<float>" : "array<int>";
-    }
-    
-    // For heterogeneous arrays with mixed types, return array<any>
-    // This allows dynamic arrays without explicit type annotation
-    return "array<any>";
-}
 
-throw std::runtime_error("Unhandled expression type in typechecker");
+        std::vector<std::string> elementTypes;
+        for (auto &elem : a->elements)
+        {
+            elementTypes.push_back(inferExpr(elem));
+        }
+
+        // If all elements same type -> array<T>
+        std::string baseType = elementTypes[0];
+        bool allSame = true;
+        for (size_t i = 1; i < elementTypes.size(); i++)
+        {
+            if (elementTypes[i] != baseType)
+            {
+                allSame = false;
+                break;
+            }
+        }
+
+        if (allSame)
+        {
+            return "array<" + baseType + ">";
+        }
+
+        // If all numeric but mixed int/float -> array<float>
+        bool allNumeric = true;
+        for (auto &t : elementTypes)
+        {
+            if (!isNumericType(t))
+            {
+                allNumeric = false;
+                break;
+            }
+        }
+        if (allNumeric)
+        {
+            return "array<float>";
+        }
+
+        // Otherwise heterogeneous → fallback to dynamic
+        return "array<any>";
+    }
+
+    throw std::runtime_error("Unhandled expression type in typechecker");
 }
