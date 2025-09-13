@@ -1,27 +1,3 @@
-fn main() {
-       //dynamic
-       var a = [1,[1,2],3,4];
-       //a[1] = 10; //working
-
-       a[2] = [1,2]; //working
-       a[3] = [[1,2],[1,2.3]] // working 
-       //a[1][1] = 3 //notworking for multidimension
-
-       //unmutable let
-       let b = [1,"fds",[1,2],4]
-
-       //b[1] = 2 should throw error unmutable
-       //print(b[2][1]) //can access
-
-       var z:array<int> = [1,2,3]
-       z[2] = 2
-
-       var y:array<int?>;
-
-       y = [1,2,3]
-
-       var e:array<array<int?> ?>
-
-       //e = [[1,2],[1,2]] 
-       //e= null
+fn main(){
+       var a:array<int?> = [1,2,3,null]
 }
