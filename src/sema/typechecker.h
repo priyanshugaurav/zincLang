@@ -8,32 +8,9 @@
 
 class TypeChecker {
 public:
-    // Constructor takes a reference to the environment
-    explicit TypeChecker(std::shared_ptr<Environment> env);
+    TypeChecker(std::shared_ptr<Environment> env);
 
-    // Entry point: check a top-level block or statement
-    void check(const StmtPtr &program);
-
-private:
-    // current lexical environment
-    std::shared_ptr<Environment> env;
-    std::shared_ptr<Environment> currentScope;
-
-    // current function return type when traversing a function body
-    // empty string means 'void' / unspecified
-    std::string currentReturnType;
-    bool sawReturn = false;
-    bool checkFunctionBody(const StmtPtr &body, const std::string &expectedRet);
-
-
-    // Helpers
-    void checkStmt(const StmtPtr &stmt);
-    void checkBlock(const std::vector<StmtPtr> &stmts);
-
-    // expression returns a type string like "int", "float", "bool", ...
-    std::string inferExpr(const ExprPtr &expr);
-
-    // utility
+    // --- Utility type checks ---
     bool isNumericType(const std::string &t) const;
     bool isIntType(const std::string &t) const;
     bool isFloatType(const std::string &t) const;
@@ -41,4 +18,19 @@ private:
     bool isStringType(const std::string &t) const;
     bool isArrayType(const std::string &t) const;
     std::string arrayElementType(const std::string &arrayType) const;
+    bool isAnyType(const std::string &t) const;
+
+    // 🔥 Add this declaration
+    bool isArrayCompatible(const std::string &declared, const std::string &inferred) const;
+
+    // ---------------------------
+    void check(const StmtPtr &program);
+    void checkStmt(const StmtPtr &stmt);
+    void checkBlock(const std::vector<StmtPtr> &stmts);
+    std::string inferExpr(const ExprPtr &expr);
+
+private:
+    std::shared_ptr<Environment> env;
+    std::shared_ptr<Environment> currentScope;
+    std::string currentReturnType;
 };

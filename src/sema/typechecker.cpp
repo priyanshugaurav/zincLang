@@ -35,6 +35,32 @@ std::string TypeChecker::arrayElementType(const std::string &arrayType) const
     return arrayType.substr(6, arrayType.size() - 7);
 }
 
+bool TypeChecker::isAnyType(const std::string &t) const 
+{ 
+    return t == "any"; 
+}
+
+bool TypeChecker::isArrayCompatible(const std::string &declared, const std::string &inferred) const {
+    if (declared == inferred)
+        return true;
+
+    // e.g. array<array<int>> vs array<any>
+    if (isArrayType(declared) && isArrayType(inferred)) {
+        std::string dElem = arrayElementType(declared);
+        std::string iElem = arrayElementType(inferred);
+
+        // allow widening only if declared is any
+        if (dElem == "any")
+            return true;
+
+        return isArrayCompatible(dElem, iElem);
+    }
+
+    // final fallback: no match
+    return false;
+}
+
+
 // ---------------------------
 // Top-level check
 // ---------------------------
@@ -65,6 +91,8 @@ void TypeChecker::checkBlock(const std::vector<StmtPtr> &stmts)
 
     env = oldEnv;
 }
+
+
 
 // ---------------------------
 // Statements
@@ -119,7 +147,7 @@ void TypeChecker::checkStmt(const StmtPtr &stmt)
                     throw std::runtime_error("Cannot assign null to non-nullable variable '" + v->name + "'");
                 }
             }
-            else if (!isDynamic && initType != baseType)
+            else if (!isDynamic && !isArrayCompatible(baseType, initType))
             {
                 throw std::runtime_error("Type mismatch for variable '" + v->name +
                                          "': expected " + baseType + ", got " + initType);
@@ -566,23 +594,23 @@ if (auto u = std::dynamic_pointer_cast<UnaryExpr>(expr)) {
     }
 
     // ArrayExpr
-    if (auto a = std::dynamic_pointer_cast<ArrayExpr>(expr))
-    {
-        if (a->elements.empty())
-        {
-            throw std::runtime_error("Empty array literal requires explicit type annotation in MVP");
-        }
-        std::string firstType = inferExpr(a->elements[0]);
-        for (size_t i = 1; i < a->elements.size(); ++i)
-        {
-            std::string t = inferExpr(a->elements[i]);
-            if (t != firstType)
-            {
-                throw std::runtime_error("Array literal elements must be homogeneous: " + firstType + " vs " + t);
-            }
-        }
-        return "array<" + firstType + ">";
-    }
+    // if (auto a = std::dynamic_pointer_cast<ArrayExpr>(expr))
+    // {
+    //     if (a->elements.empty())
+    //     {
+    //         throw std::runtime_error("Empty array literal requires explicit type annotation in MVP");
+    //     }
+    //     std::string firstType = inferExpr(a->elements[0]);
+    //     for (size_t i = 1; i < a->elements.size(); ++i)
+    //     {
+    //         std::string t = inferExpr(a->elements[i]);
+    //         if (t != firstType)
+    //         {
+    //             throw std::runtime_error("Array literal elements must be homogeneous: " + firstType + " vs " + t);
+    //         }
+    //     }
+    //     return "array<" + firstType + ">";
+    // }
 
     // IndexExpr: arr[idx]
     if (auto idx = std::dynamic_pointer_cast<IndexExpr>(expr))
@@ -643,45 +671,129 @@ if (auto u = std::dynamic_pointer_cast<UnaryExpr>(expr)) {
         return thenT;
     }
 
+
+
+
     // ArrayAssignExpr (array[index] = value) - in your AST it's an Expr node
-    // ArrayAssignExpr (array[index] = value)
-    if (auto aa = std::dynamic_pointer_cast<ArrayAssignExpr>(expr))
+// ArrayExpr
+
+if (auto aa = std::dynamic_pointer_cast<ArrayAssignExpr>(expr))
+{
+    std::string arrType = inferExpr(aa->array);
+    if (!isArrayType(arrType))
+        throw std::runtime_error("Array assignment target is not array");
+
+    // CHECK MUTABILITY
+    if (auto arrId = std::dynamic_pointer_cast<IdentifierExpr>(aa->array))
     {
-        std::string arrType = inferExpr(aa->array);
-        if (!isArrayType(arrType))
-            throw std::runtime_error("Array assignment target is not array");
-
-        std::string idxType = inferExpr(aa->index);
-        if (!isIntType(idxType))
-            throw std::runtime_error("Array index must be int");
-
-        // COMPILE-TIME BOUNDS CHECK
-        if (auto arrLit = std::dynamic_pointer_cast<ArrayExpr>(aa->array))
-        {
-            if (auto idxLit = std::dynamic_pointer_cast<LiteralExpr>(aa->index))
-            {
-                int indexValue = std::stoi(idxLit->value);
-                int arrSize = static_cast<int>(arrLit->elements.size());
-                if (indexValue < 0 || indexValue >= arrSize)
-                {
-                    throw std::runtime_error(
-                        "Array index out of bounds at compile time: " +
-                        std::to_string(indexValue) + " (array size " + std::to_string(arrSize) + ")");
-                }
-            }
-        }
-
-        // rest of type checking...
-        std::string elemType = arrayElementType(arrType);
-        std::string valType = inferExpr(aa->value);
-        if (valType != elemType)
-        {
-            if (!(isIntType(valType) && isFloatType(elemType)))
-                throw std::runtime_error("Array assignment type mismatch: expected " + elemType + ", got " + valType);
-        }
-
-        return elemType;
+        auto symOpt = env->lookup(arrId->name);
+        if (!symOpt.has_value())
+            throw std::runtime_error("Array variable not found: " + arrId->name);
+            
+        if (!symOpt->isMutable)
+            throw std::runtime_error("Cannot assign to immutable array (let): " + arrId->name);
     }
 
-    throw std::runtime_error("Unhandled expression type in typechecker");
+    std::string idxType = inferExpr(aa->index);
+    if (!isIntType(idxType))
+        throw std::runtime_error("Array index must be int");
+
+    // COMPILE-TIME BOUNDS CHECK
+    if (auto arrLit = std::dynamic_pointer_cast<ArrayExpr>(aa->array))
+    {
+        if (auto idxLit = std::dynamic_pointer_cast<LiteralExpr>(aa->index))
+        {
+            int indexValue = std::stoi(idxLit->value);
+            int arrSize = static_cast<int>(arrLit->elements.size());
+            if (indexValue < 0 || indexValue >= arrSize)
+            {
+                throw std::runtime_error(
+                    "Array index out of bounds at compile time: " +
+                    std::to_string(indexValue) + " (array size " + std::to_string(arrSize) + ")");
+            }
+        }
+    }
+
+    // Type checking for assignment
+    std::string elemType = arrayElementType(arrType);
+    std::string valType = inferExpr(aa->value);
+    
+    // If array element type is "any", allow any assignment
+    if (isAnyType(elemType))
+    {
+        return valType;  // Return the actual assigned type
+    }
+    
+    // Otherwise, enforce type compatibility
+    if (valType != elemType)
+    {
+        if (!(isIntType(valType) && isFloatType(elemType)))
+            throw std::runtime_error("Array assignment type mismatch: expected " + elemType + ", got " + valType);
+    }
+
+    return elemType;
+}
+
+// ArrayExpr - Updated to handle dynamic/heterogeneous arrays
+// ArrayExpr - Updated to handle dynamic/heterogeneous arrays
+if (auto a = std::dynamic_pointer_cast<ArrayExpr>(expr))
+{
+    if (a->elements.empty())
+    {
+        throw std::runtime_error("Empty array literal requires explicit type annotation");
+    }
+
+    std::vector<std::string> elementTypes;
+    for (auto& elem : a->elements)
+    {
+        elementTypes.push_back(inferExpr(elem));
+    }
+    
+    // Check if all elements are the same type
+    std::string firstType = elementTypes[0];
+    bool allSameType = true;
+    
+    for (size_t i = 1; i < elementTypes.size(); ++i)
+    {
+        if (elementTypes[i] != firstType)
+        {
+            allSameType = false;
+            break;
+        }
+    }
+    
+    if (allSameType)
+    {
+        return "array<" + firstType + ">";
+    }
+    
+    // Check if all types are numeric (can be unified to float)
+    bool allNumeric = true;
+    bool hasFloat = false;
+    
+    for (const auto& type : elementTypes)
+    {
+        if (!isNumericType(type))
+        {
+            allNumeric = false;
+            break;
+        }
+        if (isFloatType(type))
+        {
+            hasFloat = true;
+        }
+    }
+    
+    // If all numeric, unify to appropriate numeric type
+    if (allNumeric)
+    {
+        return hasFloat ? "array<float>" : "array<int>";
+    }
+    
+    // For heterogeneous arrays with mixed types, return array<any>
+    // This allows dynamic arrays without explicit type annotation
+    return "array<any>";
+}
+
+throw std::runtime_error("Unhandled expression type in typechecker");
 }
