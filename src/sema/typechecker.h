@@ -19,6 +19,7 @@ public:
     bool isArrayType(const std::string &t) const;
     std::string arrayElementType(const std::string &arrayType) const;
     std::string inferIndexedType(const ExprPtr &arrayExpr, int levels) ;
+    std::string unifyTypes(const std::string &a, const std::string &b) ;
     bool isAnyType(const std::string &t) const;
 
     // 🔥 Add this declaration

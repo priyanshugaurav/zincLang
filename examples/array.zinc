@@ -14,17 +14,18 @@ fn main() {
 
        y = [1,2,3, null]
 
-       //unmutable let
+       var e:array<array<int> ?> ?
+       e = [[1,2],[1],null]  //multidimension not working
+       
+
+        //unmutable let
        let b = [1,"fds",[1,2],4]
+       //b[1] = 2 should throw error unmutable
+       
+
 
        //a[1][1] = 3 //notworking for multidimension
 
-       //b[1] = 2 should throw error unmutable
        //print(b[2][1]) //can access
 
-
-
-       var e:array<array<int?> ?> ?
-
-       e = [[1,2],[1,2],null]  //multidimension not working
 }

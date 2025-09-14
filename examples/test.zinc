@@ -1,3 +1,6 @@
 fn main(){
-       var a:array<int?> = [1,2,3,null]
+          var e:array<array<int?> ?> ?
+       e = [[1,2],[1,null],null]  
+       //e = [[1,2],[1],null]  
+
 }

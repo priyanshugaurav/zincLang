@@ -48,16 +48,48 @@ bool TypeChecker::isArrayCompatible(const std::string &declared, const std::stri
         std::string dElem = arrayElementType(declared);
         std::string iElem = arrayElementType(inferred);
 
-        // Allow widening: inferred elem is T, declared is T?
+        // Case 1: declared is nullable element, inferred is non-nullable
         if (!dElem.empty() && dElem.back() == '?' && dElem.substr(0, dElem.size() - 1) == iElem)
             return true;
 
-        // recursive check (for nested arrays etc.)
+        // Case 2: declared non-nullable, inferred nullable → not allowed
+        if (!iElem.empty() && iElem.back() == '?' && iElem.substr(0, iElem.size() - 1) == dElem)
+            return false;
+
+        // Recursive check
         return isArrayCompatible(dElem, iElem);
+    }
+
+    // Handle nullable scalar widening: declared `int?`, inferred `int`
+    if (!declared.empty() && declared.back() == '?' &&
+        declared.substr(0, declared.size() - 1) == inferred) {
+        return true;
     }
 
     return false;
 }
+
+
+std::string TypeChecker::unifyTypes(const std::string &a, const std::string &b) {
+    if (a == b) return a;
+    if (a == "null") return b + (b.back() == '?' ? "" : "?");
+    if (b == "null") return a + (a.back() == '?' ? "" : "?");
+
+    if (isArrayType(a) && isArrayType(b)) {
+        std::string ea = arrayElementType(a);
+        std::string eb = arrayElementType(b);
+        std::string elem = unifyTypes(ea, eb);
+        if (elem.empty()) return "any";
+        return "array<" + elem + ">";
+    }
+
+    // widening numeric
+    if (isIntType(a) && isFloatType(b)) return "float";
+    if (isFloatType(a) && isIntType(b)) return "float";
+
+    return "any";
+}
+
 
 
 
@@ -667,15 +699,16 @@ if (auto aa = std::dynamic_pointer_cast<ArrayAssignExpr>(expr))
         throw std::runtime_error("Array assignment target is not array");
 
     // CHECK MUTABILITY
-    if (auto arrId = std::dynamic_pointer_cast<IdentifierExpr>(aa->array))
-    {
-        auto symOpt = env->lookup(arrId->name);
-        if (!symOpt.has_value())
-            throw std::runtime_error("Array variable not found: " + arrId->name);
-            
-        if (!symOpt->isMutable)
-            throw std::runtime_error("Cannot assign to immutable array (let): " + arrId->name);
-    }
+    if (auto arrId = std::dynamic_pointer_cast<IdentifierExpr>(aa->array)) {
+    auto symOpt = env->lookup(arrId->name);
+    if (!symOpt.has_value())
+        throw std::runtime_error("Array variable not found: " + arrId->name);
+
+    // 🔒 Prevent mutating elements of immutable arrays
+    if (!symOpt->isMutable)
+        throw std::runtime_error("Cannot assign to element of immutable array (let): " + arrId->name);
+}
+
 
     std::string idxType = inferExpr(aa->index);
     if (!isIntType(idxType))
@@ -718,39 +751,13 @@ if (auto aa = std::dynamic_pointer_cast<ArrayAssignExpr>(expr))
 }
 
 // ArrayExpr - Updated to handle dynamic/heterogeneous arrays
-// ArrayExpr - Updated to handle dynamic/heterogeneous arrays
 if (auto arr = std::dynamic_pointer_cast<ArrayExpr>(expr)) {
-    std::string unifiedType;
-    bool sawNull = false;
-
-    for (auto &el : arr->elements) {
-        std::string elemType = inferExpr(el);
-
-        if (elemType == "null") {
-            sawNull = true;
-            continue;
-        }
-
-        if (unifiedType.empty()) {
-            unifiedType = elemType;
-        } else if (unifiedType != elemType) {
-            // If conflict, fallback to any
-            unifiedType = "any";
-        }
+    if (arr->elements.empty()) return "array<any>"; // empty literal
+    std::string elemType = inferExpr(arr->elements[0]);
+    for (size_t i = 1; i < arr->elements.size(); ++i) {
+        elemType = unifyTypes(elemType, inferExpr(arr->elements[i]));
     }
-
-    if (unifiedType.empty()) {
-        unifiedType = "any";
-    }
-
-    if (sawNull) {
-        // if already nullable, don’t double-add ?
-        if (unifiedType != "any" && unifiedType.back() != '?') {
-            unifiedType += "?";
-        }
-    }
-
-    return "array<" + unifiedType + ">";
+    return "array<" + elemType + ">";
 }
 
 throw std::runtime_error("Unhandled expression type in typechecker");
