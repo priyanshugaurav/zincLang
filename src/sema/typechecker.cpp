@@ -95,6 +95,10 @@ bool TypeChecker::isArrayCompatible(const std::string &declared, const std::stri
         std::string dElem = arrayElementType(declared);
         std::string iElem = arrayElementType(inferred);
 
+        // Special case: [null] allowed if declared element type is nullable
+        if (iElem == "null" && !dElem.empty() && dElem.back() == '?')
+            return true;
+
         // Case 1: declared is nullable element, inferred is non-nullable
         if (!dElem.empty() && dElem.back() == '?' && dElem.substr(0, dElem.size() - 1) == iElem)
             return true;
@@ -116,6 +120,7 @@ bool TypeChecker::isArrayCompatible(const std::string &declared, const std::stri
 
     return false;
 }
+
 
 std::string TypeChecker::unifyTypes(const std::string &a, const std::string &b)
 {

@@ -26,7 +26,7 @@ fn main() {
 
     var z:array<int> = [1,2,3]
     z[2] = 2   // ✅
-    // z[2] = "str"  // ❌ Compile-time error, uncomment to test
+      // z[2] = "str"  // ❌ Compile-time error, uncomment to test
 
     print(z)
 
@@ -65,8 +65,8 @@ fn main() {
 
     // var bad:array<int> = [null] // ❌ Compile-time error
 
-    //var good:array<int?> = [null]
-    //print(good)
+    var good:array<int?> = [null]
+    print(good)
 
     // Out of bounds
     var x = [1,2,3]
@@ -77,8 +77,8 @@ fn main() {
     nn = null      // ✅ allowed
     print(nn)
 
-    var nn2:array<int>? 
-    // nn2 = null   // ❌ Compile-time error
+    var nn2:array<int?>? 
+     nn2 = [1,2,null]   // should work
 
     print("=== Tests Complete ===")
 }
