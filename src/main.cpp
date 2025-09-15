@@ -7,6 +7,7 @@
 #include "ast/ast.h"
 #include "sema/environment.h"
 #include "sema/typechecker.h"
+#include "ir/ir_builder.h"
 
 // ---------------------------
 // Utilities
@@ -125,7 +126,7 @@ std::string tokenTypeToString(TokenType t)
 
     case TokenType::Eof:
         return "Eof";
-        case TokenType::Null:
+    case TokenType::Null:
         return "Null";
     case TokenType::Question:
         return "Question";
@@ -133,7 +134,7 @@ std::string tokenTypeToString(TokenType t)
     case TokenType::Unknown:
         return "Unknown";
     }
-    
+
     return "???";
 }
 
@@ -156,10 +157,10 @@ void printAST(const ExprPtr &expr, int indent)
     auto ind = indentStr(indent);
 
     if (auto lit = std::dynamic_pointer_cast<LiteralExpr>(expr))
-{
-    std::cout << ind << "Literal: " << lit->value 
-              << " (type: " << lit->type << ")\n";
-}
+    {
+        std::cout << ind << "Literal: " << lit->value
+                  << " (type: " << lit->type << ")\n";
+    }
 
     else if (auto id = std::dynamic_pointer_cast<IdentifierExpr>(expr))
     {
@@ -337,11 +338,20 @@ int main(int argc, char *argv[])
             checker.check(ast);
             std::cout << "✅ Type checking passed!\n";
         }
+
         catch (const std::exception &ex)
         {
             std::cerr << "Type Error: " << ex.what() << "\n";
             return 1;
         }
+
+        ir::Module module;
+        ir::IRBuilder irBuilder(&module);
+
+        std::cout << "\n===== IR Generation =====\n";
+        irBuilder.build(ast); // builds into the existing module
+
+        std::cout << module.dump();
     }
     catch (const std::exception &ex)
     {

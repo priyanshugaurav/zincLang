@@ -21,6 +21,8 @@ add_library(zincLib
     src/sema/environment.cpp
     src/sema/typechecker.cpp
     src/runtime/builtins.cpp
+    src/ir/ir.cpp
+    src/ir/ir_builder.cpp
     # Add other core files here (AST, sema, utils)
 )
 

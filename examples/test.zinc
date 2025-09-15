@@ -1,5 +1,4 @@
 fn main(){
-   var good:array<int?> = [null] // not working
-   //var good:array<int?> = [1] //also working
-   //var good:array<int?> = [null,2]  //if nay other element then its working
+   let a = [1,2,3]
+   a[1] = 10
 }
