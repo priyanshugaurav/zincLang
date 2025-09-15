@@ -33,6 +33,8 @@ public:
     Instruction* createBr(BasicBlock* target);
     Instruction* createCondBr(Value* cond, BasicBlock* t, BasicBlock* f);
     Instruction* createPhi(Type t, const std::vector<std::pair<Value*, BasicBlock*>>& incoming);
+    Instruction* createCast(Value* val, Type targetType);
+    Instruction* createCmp(Instruction::Op cmpOp, Value* a, Value* b);
 
     // High-level lowering interface from AST
     void lowerFunction(const std::shared_ptr<FuncDecl>& fdecl);
