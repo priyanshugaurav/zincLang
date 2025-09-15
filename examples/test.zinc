@@ -1,6 +1,5 @@
 fn main(){
-          var e:array<array<int?> ?> ?
-       e = [[1,2],[1,null],null]  
-       //e = [[1,2],[1],null]  
-
+   var good:array<int?> = [null] // not working
+   //var good:array<int?> = [1] //also working
+   //var good:array<int?> = [null,2]  //if nay other element then its working
 }
