@@ -16,6 +16,10 @@ fn main() {
 
        var e:array<array<int> ?> ?
        e = [[1,2],[1],null]  //multidimension not working
+
+       var w:array<array<int?> ?> ?
+       w = [[1,2],[1,null],null]  
+       //w = [[1,2],[1],null] 
        
 
         //unmutable let

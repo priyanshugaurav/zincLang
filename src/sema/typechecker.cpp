@@ -23,17 +23,51 @@ bool TypeChecker::isIntType(const std::string &t) const { return t == "int"; }
 bool TypeChecker::isFloatType(const std::string &t) const { return t == "float"; }
 bool TypeChecker::isBoolType(const std::string &t) const { return t == "bool"; }
 bool TypeChecker::isStringType(const std::string &t) const { return t == "string"; }
-bool TypeChecker::isArrayType(const std::string &t) const
-{
-    return t.rfind("array<", 0) == 0 && t.back() == '>';
+bool TypeChecker::isArrayType(const std::string &t) const {
+    // "array<...>" possibly with "?" at the end
+    if (t.rfind("array<", 0) != 0) return false;
+    // find matching '>'
+    int depth = 0;
+    for (size_t i = 6; i < t.size(); ++i) {
+        if (t[i] == '<') depth++;
+        else if (t[i] == '>') {
+            if (depth == 0) {
+                // if this '>' is the matching, next char can be '?', or end
+                return (i + 1 == t.size() || t[i+1] == '?');
+            }
+            depth--;
+        }
+    }
+    return false;
 }
-std::string TypeChecker::arrayElementType(const std::string &arrayType) const
-{
-    // expected format: array<elem>
+std::string TypeChecker::arrayElementType(const std::string &arrayType) const {
+    // expected format: "array<elem>" or "array<elem>?" if nullable array
     if (!isArrayType(arrayType))
         return "";
-    return arrayType.substr(6, arrayType.size() - 7);
+    // strip "array<" and trailing ">"
+    // find the matching '>' for the '<'
+    // Your simple substr might assume no nested arrays; but here, arrays of arrays need nesting support
+    // So better to parse properly — but for simplicity, assume well-formed with nested array<>
+    // Let's do this:
+    int depth = 0;
+    size_t start = arrayType.find('<');
+    size_t i = start + 1;
+    for (; i < arrayType.size(); ++i) {
+        if (arrayType[i] == '<') depth++;
+        else if (arrayType[i] == '>') {
+            if (depth == 0) break;
+            depth--;
+        }
+    }
+    size_t end = i;  // position of the matching '>'
+    std::string inner = arrayType.substr(start + 1, end - (start + 1));
+    // after end, there might be "?" for nullable array
+    if (end + 1 < arrayType.size() && arrayType[end + 1] == '?') {
+        inner.push_back('?');
+    }
+    return inner;
 }
+
 
 bool TypeChecker::isAnyType(const std::string &t) const 
 { 
@@ -71,25 +105,66 @@ bool TypeChecker::isArrayCompatible(const std::string &declared, const std::stri
 
 
 std::string TypeChecker::unifyTypes(const std::string &a, const std::string &b) {
-    if (a == b) return a;
-    if (a == "null") return b + (b.back() == '?' ? "" : "?");
-    if (b == "null") return a + (a.back() == '?' ? "" : "?");
+    // some helpers
+    auto isNullable = [](const std::string &s) {
+        return !s.empty() && s.back() == '?';
+    };
+    auto withoutNullable = [&](const std::string &s) {
+        if (isNullable(s)) return s.substr(0, s.size() - 1);
+        return s;
+    };
 
+    // If both identical
+    if (a == b) return a;
+
+    // Handle null
+    if (a == "null") {
+        // b becomes nullable
+        return isNullable(b) ? b : (b + "?");
+    }
+    if (b == "null") {
+        return isNullable(a) ? a : (a + "?");
+    }
+
+    // Handle array types
     if (isArrayType(a) && isArrayType(b)) {
         std::string ea = arrayElementType(a);
         std::string eb = arrayElementType(b);
-        std::string elem = unifyTypes(ea, eb);
-        if (elem.empty()) return "any";
-        return "array<" + elem + ">";
+        std::string unifiedElem = unifyTypes(ea, eb);  // recursive
+
+        if (unifiedElem.empty()) {
+            // fallback: the least-specific inner type we accept (maybe "any?")
+            unifiedElem = "any";
+        }
+
+        // Decide if the outer array itself should be nullable
+        bool outerNullable = isNullable(a) || isNullable(b);
+
+        std::string result = "array<" + unifiedElem + ">";
+        if (outerNullable) result.push_back('?');
+        return result;
     }
 
-    // widening numeric
+    // Scalar / non-array types
+
+    // If one is nullable
+    if (isNullable(a) || isNullable(b)) {
+        std::string baseA = withoutNullable(a);
+        std::string baseB = withoutNullable(b);
+        std::string unified = unifyTypes(baseA, baseB);  // unify non-null parts
+        if (unified.empty()) unified = "any";
+        // Make it nullable
+        if (!isNullable(unified)) unified.push_back('?');
+        return unified;
+    }
+
+    // Numeric widening
     if (isIntType(a) && isFloatType(b)) return "float";
     if (isFloatType(a) && isIntType(b)) return "float";
 
+    // If types are incomparable, fallback to "any"
     return "any";
 }
-
 
 
 
