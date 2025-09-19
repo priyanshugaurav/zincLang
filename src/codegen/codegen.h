@@ -58,6 +58,7 @@ namespace nasm
         }
 
         void emit(const std::string &s) { out << s << "\n"; }
+        std::unordered_map<std::string, std::string> varTypes; // "string", "int", etc.
 
         // A robust convert-and-print routine that preserves callee-saved registers
         // and computes the printed length correctly. It assumes the integer to print is in RAX.
@@ -267,6 +268,16 @@ namespace nasm
 
                 if (v->initializer)
                 {
+                    // If initializer is a literal string, remember the var's type so print() can treat it specially.
+                    if (auto litInit = std::dynamic_pointer_cast<LiteralExpr>(v->initializer))
+                    {
+                        if (litInit->type == "string")
+                            varTypes[v->name] = "string";
+                        else if (litInit->type == "int")
+                            varTypes[v->name] = "int";
+                        // add other types if you want
+                    }
+
                     genExpr(v->initializer);
                     int off = varTable[v->name];
                     emit("    mov " + slot(off) + ", rax");
@@ -308,52 +319,90 @@ namespace nasm
                 emit(endLbl + ":");
             }
             else if (auto e = std::dynamic_pointer_cast<ExprStmt>(stmt))
-{
-    // Handle builtin "print" calls
-    if (auto call = std::dynamic_pointer_cast<CallExpr>(e->expr))
-    {
-        if (auto id = std::dynamic_pointer_cast<IdentifierExpr>(call->callee))
-        {
-            if (id->name == "print")
             {
-                if (call->args.size() != 1)
-                    throw std::runtime_error("print() expects exactly 1 argument");
-
-                auto arg = call->args[0];
-                if (auto lit = std::dynamic_pointer_cast<LiteralExpr>(arg))
+                // Handle builtin "print" calls
+                if (auto call = std::dynamic_pointer_cast<CallExpr>(e->expr))
                 {
-                    if (lit->type == "string")
+                    if (auto id = std::dynamic_pointer_cast<IdentifierExpr>(call->callee))
                     {
-                        std::string lbl = "str_" + std::to_string(labelCounter++);
-                        std::string esc = escapeString(lit->value);
-                        dataSection.push_back(lbl + ": db \"" + esc + "\", 0");
+                        if (id->name == "print")
+                        {
+                            if (call->args.size() != 1)
+                                throw std::runtime_error("print() expects exactly 1 argument");
 
-                        emit("    mov rax, 1");
-                        emit("    mov rdi, 1");
-                        emit("    lea rsi, [rel " + lbl + "]");
-                        emit("    mov rdx, " + std::to_string(lit->value.size()));
-                        emit("    syscall");
-                    }
-                    else
-                    {
-                        genExpr(arg);
-                        emitPrintRax();
+                            auto arg = call->args[0];
+
+                            // literal string => same as before (compile-time known length)
+                            if (auto lit = std::dynamic_pointer_cast<LiteralExpr>(arg))
+                            {
+                                if (lit->type == "string")
+                                {
+                                    std::string lbl = "str_" + std::to_string(labelCounter++);
+                                    std::string esc = escapeString(lit->value);
+                                    dataSection.push_back(lbl + ": db \"" + esc + "\", 0");
+
+                                    emit("    mov rax, 1");
+                                    emit("    mov rdi, 1");
+                                    emit("    lea rsi, [rel " + lbl + "]");
+                                    emit("    mov rdx, " + std::to_string(lit->value.size()));
+                                    emit("    syscall");
+                                }
+                                else
+                                {
+                                    genExpr(arg);
+                                    emitPrintRax();
+                                }
+                            }
+                            // identifier: might be a string variable, handle specially
+                            else if (auto idArg = std::dynamic_pointer_cast<IdentifierExpr>(arg))
+                            {
+                                // If the compiler knows this variable is a string, emit sys_write of the pointed data.
+                                auto it = varTypes.find(idArg->name);
+                                if (it != varTypes.end() && it->second == "string")
+                                {
+                                    int off = varTable[idArg->name];
+
+                                    // Load pointer into rsi (sys_write expects buffer in RSI)
+                                    // slot(off) returns "qword [rbp-8]" etc., so this becomes "mov rsi, qword [rbp-8]"
+                                    emit("    mov rsi, " + slot(off));
+
+                                    // Compute length at runtime: use rcx as counter
+                                    std::string lenLbl = newLabel("strlen");
+                                    emit("    xor rcx, rcx");
+                                    emit(lenLbl + "_loop:");
+                                    emit("    cmp byte [rsi+rcx], 0");
+                                    emit("    je " + lenLbl + "_done");
+                                    emit("    inc rcx");
+                                    emit("    jmp " + lenLbl + "_loop");
+                                    emit(lenLbl + "_done:");
+                                    // rcx now holds length
+                                    emit("    mov rdx, rcx");
+                                    emit("    mov rax, 1"); // sys_write
+                                    emit("    mov rdi, 1"); // stdout
+                                    emit("    syscall");
+                                }
+                                else
+                                {
+                                    // Unknown type or not string: evaluate expression and print as integer
+                                    genExpr(arg);
+                                    emitPrintRax();
+                                }
+                            }
+                            else
+                            {
+                                // Other expression kinds: evaluate and print as integer by default
+                                genExpr(arg);
+                                emitPrintRax();
+                            }
+
+                            return; // handled print
+                        }
                     }
                 }
-                else
-                {
-                    genExpr(arg);
-                    emitPrintRax();
-                }
-                return; // handled print
+
+                // Normal expression statement
+                genExpr(e->expr);
             }
-        }
-    }
-
-    // Normal expression statement
-    genExpr(e->expr);
-}
-
 
             else if (auto p = std::dynamic_pointer_cast<PrintStmt>(stmt))
             {

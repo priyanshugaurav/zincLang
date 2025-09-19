@@ -1,4 +1,5 @@
 fn main(){
    var a = "fds"
-   print("hello")
+   let b = 30 + 40
+   print(b)
 }
