@@ -6,6 +6,7 @@ fn main() {
     var y = 20          // mutable, type inferred as int
     //x = 15            // ❌ should fail: immutable
     y = 25              // ✅ allowed
+    print(y)
 
     // -----------------------------
     // Explicit type

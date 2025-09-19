@@ -197,3 +197,9 @@ struct FuncDecl : Statement {
          const std::string &ret = "")
     : name(n), params(std::move(p)), returnType(ret), body(b) {}
 };
+
+
+struct PrintStmt : Statement {
+    ExprPtr expr;
+    PrintStmt(const ExprPtr &e) : expr(e) {}
+};

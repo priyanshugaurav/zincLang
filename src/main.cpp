@@ -7,7 +7,10 @@
 #include "ast/ast.h"
 #include "sema/environment.h"
 #include "sema/typechecker.h"
-#include "ir/ir_builder.h"
+
+#include "ir/ir.h"
+#include "codegen/codegen.h"
+
 
 // ---------------------------
 // Utilities
@@ -345,13 +348,44 @@ int main(int argc, char *argv[])
             return 1;
         }
 
-        ir::Module module;
-        ir::IRBuilder irBuilder(&module);
+        // std::cout << "\n===== LLVM IR =====\n";
 
-        std::cout << "\n===== IR Generation =====\n";
-        irBuilder.build(ast); // builds into the existing module
+        // // Create a Codegen instance
+        // Codegen cg("ZincModule");
 
-        std::cout << module.dump();
+        // // Define a main function
+        // llvm::FunctionType *mainTy =
+        //     llvm::FunctionType::get(llvm::Type::getInt32Ty(cg.context), false);
+        // llvm::Function *mainFunc =
+        //     llvm::Function::Create(mainTy, llvm::Function::ExternalLinkage, "main", cg.getModule());
+
+        // llvm::BasicBlock *entry = llvm::BasicBlock::Create(cg.context, "entry", mainFunc);
+        // cg.builder.SetInsertPoint(entry);
+
+        // // Lower the AST into LLVM IR
+        // cg.codegenStmt(ast);
+
+        // // Ensure function ends with return
+        // if (!entry->getTerminator())
+        // {
+        //     cg.builder.CreateRet(llvm::ConstantInt::get(cg.context, llvm::APInt(32, 0)));
+        // }
+
+        // // Verify function
+        // llvm::verifyFunction(*mainFunc);
+
+        // // Print IR to console
+        // cg.getModule()->print(llvm::outs(), nullptr);
+
+        // // Also save to file
+        // std::error_code EC;
+        // llvm::raw_fd_ostream dest("output.ll", EC);
+        // cg.getModule()->print(dest, nullptr);
+        // std::cout << "\n✅ LLVM IR written to output.ll\n";
+        std::cout << "\n===== NASM Codegen =====\n";
+        nasm::Codegen cg("output.asm");
+        cg.generate(ast);
+        std::cout << "✅ Assembly written to output.asm\n";
     }
     catch (const std::exception &ex)
     {
