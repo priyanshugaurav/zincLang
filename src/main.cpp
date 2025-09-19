@@ -9,6 +9,7 @@
 #include "sema/typechecker.h"
 
 #include "ir/ir.h"
+#include <cstdlib> 
 #include "codegen/codegen.h"
 
 
@@ -386,6 +387,11 @@ int main(int argc, char *argv[])
         nasm::Codegen cg("output.asm");
         cg.generate(ast);
         std::cout << "✅ Assembly written to output.asm\n";
+        // std::system("nasm -f elf64 output.asm");
+        // std::system("ld output.o");
+        // std::system("./a.out");
+        
+
     }
     catch (const std::exception &ex)
     {

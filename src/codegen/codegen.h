@@ -55,10 +55,88 @@ namespace nasm
             out.open(filename);
             if (!out)
                 throw std::runtime_error("Could not open output file");
+
+            dataSection.push_back("dot_char: db '.', 0"); // keep dot_char here
+            // dataSection.push_back("num_buf: resb 32"); // REMOVE THIS LINE
         }
 
         void emit(const std::string &s) { out << s << "\n"; }
         std::unordered_map<std::string, std::string> varTypes; // "string", "int", etc.
+
+        void emitPrintDouble()
+        {
+            std::string lbl = newLabel("dbl");
+
+            // Save callee-saved registers and make space for xmm0
+            emit("    push rbx");
+            emit("    push r12");
+            emit("    push r13");
+            emit("    sub rsp, 8");        // temporary space for xmm0
+            emit("    movsd [rsp], xmm0"); // save original double
+
+            // --- integer part ---
+            emit("    cvttsd2si rax, xmm0"); // rax = int(x)
+            emitPrintRax();                  // prints integer part
+
+            // --- print dot ---
+            emit("    mov rax, 1");
+            emit("    mov rdi, 1");
+            emit("    lea rsi, [rel dot_char]");
+            emit("    mov rdx, 1");
+            emit("    syscall");
+
+            // --- fractional part ---
+            emit("    movsd xmm1, [rsp]");  // reload original double
+            emit("    cvtsi2sd xmm2, rax"); // convert integer part back to double
+            emit("    subsd xmm1, xmm2");   // frac = original - int
+
+            // handle negative numbers
+            emit("    movapd xmm2, xmm1");
+            emit("    roundsd xmm2, xmm2, 1"); // round toward zero
+            emit("    ucomisd xmm2, xmm2");
+            emit("    jb " + lbl + "_neg"); // jump if negative
+            emit(lbl + "_pos:");
+
+            emit("    mov rbx, 1000000"); // scale fraction by 10^6
+            emit("    cvtsi2sd xmm2, rbx");
+            emit("    mulsd xmm1, xmm2");
+            emit("    roundsd xmm1, xmm1, 1"); // round fractional part
+            emit("    cvttsd2si rax, xmm1");   // integer fractional part
+            emit("    jmp " + lbl + "_print");
+
+            emit(lbl + "_neg:");
+            emit("    neg rax"); // make positive
+            emit(lbl + "_print:");
+
+            // print fractional part with leading zeros
+            emit("    mov rbx, rax");
+            emit("    lea rdi, [num_buf+6]"); // end of 6-digit buffer
+            emit("    mov rcx, 6");           // 6 digits
+            emit(lbl + "_frac_loop:");
+            emit("        xor rdx, rdx");
+            emit("        mov rax, rbx");
+            emit("        mov r8, 10");
+            emit("        div r8"); // rax = rbx / 10, rdx = rbx % 10
+            emit("        add dl, '0'");
+            emit("        dec rdi");
+            emit("        mov [rdi], dl");
+            emit("        mov rbx, rax");
+            emit("        loop " + lbl + "_frac_loop");
+
+            // write fractional part
+            emit("    mov rax, 1");
+            emit("    mov rdi, 1");
+            emit("    mov rsi, rdi");       // RSI should point to buffer
+            emit("    lea rsi, [num_buf]"); // actually point to start of fractional digits
+            emit("    mov rdx, 6");         // write 6 characters
+            emit("    syscall");
+
+            // restore stack and registers
+            emit("    add rsp, 8");
+            emit("    pop r13");
+            emit("    pop r12");
+            emit("    pop rbx");
+        }
 
         // A robust convert-and-print routine that preserves callee-saved registers
         // and computes the printed length correctly. It assumes the integer to print is in RAX.
@@ -275,6 +353,8 @@ namespace nasm
                             varTypes[v->name] = "string";
                         else if (litInit->type == "int")
                             varTypes[v->name] = "int";
+                        else if (litInit->type == "float")
+                            varTypes[v->name] = "float";
                         // add other types if you want
                     }
 
@@ -318,6 +398,65 @@ namespace nasm
 
                 emit(endLbl + ":");
             }
+            else if (auto w = std::dynamic_pointer_cast<WhileStmt>(stmt))
+            {
+                std::string startLbl = newLabel(".Lwhile_start");
+                std::string endLbl = newLabel(".Lwhile_end");
+
+                emit(startLbl + ":");
+
+                // Evaluate condition, result in rax
+                genExpr(w->condition);
+
+                // Compare with 0, jump to end if false
+                emit("    cmp rax, 0");
+                emit("    je " + endLbl);
+
+                // Generate loop body
+                genStmt(w->body);
+
+                // Jump back to start
+                emit("    jmp " + startLbl);
+
+                emit(endLbl + ":");
+            }
+            else if (auto t = std::dynamic_pointer_cast<TimesStmt>(stmt))
+            {
+                // Generate code for the loop count
+                genExpr(t->count); // rax = number of iterations
+
+                std::string startLbl = newLabel(".Ltimes_start");
+                std::string endLbl = newLabel(".Ltimes_end");
+
+                // Save rax (iteration count) into a local variable on the stack
+                stackOffset -= 8;
+                int loopVarOffset = stackOffset;
+                emit("    mov " + slot(loopVarOffset) + ", rax");
+
+                emit(startLbl + ":");
+
+                // Load remaining count
+                emit("    mov rax, " + slot(loopVarOffset));
+                emit("    cmp rax, 0");
+                emit("    je " + endLbl);
+
+                // Generate loop body
+                genStmt(t->body);
+
+                // Decrement counter and store back
+                emit("    mov rax, " + slot(loopVarOffset));
+                emit("    sub rax, 1");
+                emit("    mov " + slot(loopVarOffset) + ", rax");
+
+                // Jump back to start
+                emit("    jmp " + startLbl);
+
+                emit(endLbl + ":");
+
+                // Restore stack
+                stackOffset += 8;
+            }
+
             else if (auto e = std::dynamic_pointer_cast<ExprStmt>(stmt))
             {
                 // Handle builtin "print" calls
@@ -363,7 +502,6 @@ namespace nasm
                                     int off = varTable[idArg->name];
 
                                     // Load pointer into rsi (sys_write expects buffer in RSI)
-                                    // slot(off) returns "qword [rbp-8]" etc., so this becomes "mov rsi, qword [rbp-8]"
                                     emit("    mov rsi, " + slot(off));
 
                                     // Compute length at runtime: use rcx as counter
@@ -381,6 +519,13 @@ namespace nasm
                                     emit("    mov rdi, 1"); // stdout
                                     emit("    syscall");
                                 }
+                                else if (it != varTypes.end() && it->second == "float")
+                                {
+                                    int off = varTable[idArg->name];
+                                    emit("    movq xmm0, " + slot(off));
+                                    emitPrintDouble();
+                                }
+
                                 else
                                 {
                                     // Unknown type or not string: evaluate expression and print as integer
@@ -456,8 +601,8 @@ namespace nasm
                 {
                     std::string lbl = "flt_" + std::to_string(labelCounter++);
                     dataSection.push_back(lbl + ": dq " + lit->value);
-                    emit("    movq xmm0, [" + lbl + "]");
-                    emit("    movq rax, xmm0");
+                    emit("    movq xmm0, [rel " + lbl + "]");
+                    emitPrintDouble();
                 }
             }
             else if (auto id = std::dynamic_pointer_cast<IdentifierExpr>(expr))

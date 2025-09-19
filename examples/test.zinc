@@ -1,5 +1,11 @@
-fn main(){
-   var a = "fds"
-   let b = 30 + 40
-   print(b)
+fn main() {
+    var n = 6
+    var fact = 1
+
+    times(n) {
+        fact = fact * n
+        n = n - 1
+    }
+
+    print(1)
 }
