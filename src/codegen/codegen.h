@@ -62,6 +62,8 @@ namespace nasm
             // dataSection.push_back("num_buf: resb 32"); // REMOVE THIS LINE
             dataSection.push_back("minus_char: db '-', 0");
             dataSection.push_back("half_const: dq 0.5");
+            dataSection.push_back("true_str: db 'true', 0");
+            dataSection.push_back("false_str: db 'false', 0");
             // minus_char: db '-', 0
         }
 
@@ -85,6 +87,12 @@ namespace nasm
                 {
                     return getExprType(bin->rhs);
                 }
+                // Comparison operators return bool
+                else if (bin->op == "==" || bin->op == "!=" || bin->op == "<" ||
+                         bin->op == "<=" || bin->op == ">" || bin->op == ">=")
+                {
+                    return "bool";
+                }
                 else
                 {
                     std::string leftType = getExprType(bin->lhs);
@@ -99,10 +107,39 @@ namespace nasm
             }
             else if (auto un = std::dynamic_pointer_cast<UnaryExpr>(expr))
             {
-                return getExprType(un->rhs);
+                if (un->op == "!")
+                    return "bool";
+                else
+                    return getExprType(un->rhs);
             }
 
             return "int"; // default
+        }
+
+        void emitPrintBool()
+        {
+            std::string lbl = newLabel("bool");
+
+            emit("    cmp rax, 0");
+            emit("    je " + lbl + "_false");
+
+            // Print "true"
+            emit("    mov rax, 1");
+            emit("    mov rdi, 1");
+            emit("    lea rsi, [rel true_str]");
+            emit("    mov rdx, 4");
+            emit("    syscall");
+            emit("    jmp " + lbl + "_done");
+
+            emit(lbl + "_false:");
+            // Print "false"
+            emit("    mov rax, 1");
+            emit("    mov rdi, 1");
+            emit("    lea rsi, [rel false_str]");
+            emit("    mov rdx, 5");
+            emit("    syscall");
+
+            emit(lbl + "_done:");
         }
 
         void emitPrintDouble()
@@ -538,6 +575,10 @@ namespace nasm
                             {
                                 emit("    movq xmm0, rax");
                                 emitPrintDouble();
+                            }
+                            else if (argType == "bool")
+                            {
+                                emitPrintBool();
                             }
                             else
                             {

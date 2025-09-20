@@ -1,9 +1,7 @@
+   fn add(a,b){
+       return a+b
+    }
+
 fn main() {
-    var a = 12.12121212;
-    var b = 11.12;
-    print(a)
-    print(" ");
-    print(b)
-    print(" ");
-    print(12.12 - 11.123)
+    
 }
