@@ -1,11 +1,9 @@
 fn main() {
-    var n = 6
-    var fact = 1
-
-    times(n) {
-        fact = fact * n
-        n = n - 1
-    }
-
-    print(1)
+    var a = 12.12121212;
+    var b = 11.12;
+    print(a)
+    print(" ");
+    print(b)
+    print(" ");
+    print(12.12 - 11.123)
 }
