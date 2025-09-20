@@ -17,7 +17,7 @@ TypeChecker::TypeChecker(std::shared_ptr<Environment> env)
 // Utility type checks
 bool TypeChecker::isNumericType(const std::string &t) const
 {
-    return t == "int" || t == "float";
+    return t == "int" || t == "float" || t == "any";
 }
 bool TypeChecker::isIntType(const std::string &t) const { return t == "int"; }
 bool TypeChecker::isFloatType(const std::string &t) const { return t == "float"; }
@@ -120,7 +120,6 @@ bool TypeChecker::isArrayCompatible(const std::string &declared, const std::stri
 
     return false;
 }
-
 
 std::string TypeChecker::unifyTypes(const std::string &a, const std::string &b)
 {
@@ -440,78 +439,90 @@ void TypeChecker::checkStmt(const StmtPtr &stmt)
 
     // FuncDecl
     // FuncDecl
-    if (auto fn = std::dynamic_pointer_cast<FuncDecl>(stmt))
+    // REPLACE your FuncDecl handling in checkStmt with this:
+
+if (auto fn = std::dynamic_pointer_cast<FuncDecl>(stmt))
+{
+    // Check body with a new env: params in scope
+    auto oldEnv = env;
+    env = std::make_shared<Environment>(oldEnv);
+
+    // define params (use "any" for missing param types)
+    for (auto &p : fn->params)
     {
-        // build function type string for storage e.g. fn(int,int)->int
-        std::ostringstream sig;
-        sig << "fn(";
-        for (size_t i = 0; i < fn->params.size(); ++i)
+        const std::string &pname = p.first;
+        const std::string ptype = p.second.empty() ? "any" : p.second;
+        if (!env->define(pname, ptype, false))
         {
-            if (i)
-                sig << ",";
-            // params[i].second may be empty -> treat as "any"
-            std::string ptype = fn->params[i].second.empty() ? "any" : fn->params[i].second;
-            sig << ptype;
+            throw std::runtime_error("Parameter name already used in function '" + fn->name + "': " + pname);
         }
-        sig << ")->";
-        // If return type not declared, use "any" in the signature so callers accept it.
-        // The body checking will enter an inference mode to validate returns inside the function body.
-        std::string retType = fn->returnType.empty() ? "any" : fn->returnType;
-        sig << (retType.empty() ? "void" : retType);
-
-        // define function symbol in current env (so functions are first-class referencable)
-        if (!env->define(fn->name, sig.str(), false))
-        {
-            throw std::runtime_error("Function already defined: " + fn->name);
-        }
-
-        // Check body with a new env: params in scope
-        auto oldEnv = env;
-        env = std::make_shared<Environment>(oldEnv);
-
-        // define params (use "any" for missing param types)
-        for (auto &p : fn->params)
-        {
-            const std::string &pname = p.first;
-            const std::string ptype = p.second.empty() ? "any" : p.second;
-            if (!env->define(pname, ptype, false))
-            {
-                throw std::runtime_error("Parameter name already used in function '" + fn->name + "': " + pname);
-            }
-        }
-
-        // set current return type
-        std::string oldReturn = currentReturnType;
-
-        // if no declared return type, enable inference mode
-        if (fn->returnType.empty())
-            currentReturnType = "__INFER_RET__";
-        else
-            currentReturnType = fn->returnType;
-
-        // body should be a BlockStmt normally
-        if (auto bodyBlock = std::dynamic_pointer_cast<BlockStmt>(fn->body))
-        {
-            checkBlock(bodyBlock->statements);
-        }
-        else
-        {
-            // single-statement function bodies (not typical) - check directly
-            checkStmt(fn->body);
-        }
-
-        // If function had no declared return type and inference left it as "__INFER_RET__",
-        // it means no return statements were present -> treat as void (no value returned).
-        if (fn->returnType.empty() && currentReturnType == "__INFER_RET__")
-        {
-            currentReturnType = "void";
-        }
-
-        // restore
-        currentReturnType = oldReturn;
-        env = oldEnv;
-        return;
     }
+
+    // set current return type
+    std::string oldReturn = currentReturnType;
+
+    // if no declared return type, enable inference mode
+    if (fn->returnType.empty())
+        currentReturnType = "__INFER_RET__";
+    else
+        currentReturnType = fn->returnType;
+
+    // body should be a BlockStmt normally
+    if (auto bodyBlock = std::dynamic_pointer_cast<BlockStmt>(fn->body))
+    {
+        checkBlock(bodyBlock->statements);
+    }
+    else
+    {
+        // single-statement function bodies (not typical) - check directly
+        checkStmt(fn->body);
+    }
+
+    // If function had no declared return type and inference left it as "__INFER_RET__",
+    // it means no return statements were present -> treat as void (no value returned).
+    std::string actualReturnType;
+    if (fn->returnType.empty() && currentReturnType == "__INFER_RET__")
+    {
+        actualReturnType = "void";
+    }
+    else if (fn->returnType.empty())
+    {
+        // Function had no declared return type but we inferred one
+        actualReturnType = currentReturnType;
+    }
+    else
+    {
+        // Function had explicit return type
+        actualReturnType = fn->returnType;
+    }
+
+    // NOW build function type string with the correct return type
+    std::ostringstream sig;
+    sig << "fn(";
+    for (size_t i = 0; i < fn->params.size(); ++i)
+    {
+        if (i)
+            sig << ",";
+        // params[i].second may be empty -> treat as "any"
+        std::string ptype = fn->params[i].second.empty() ? "any" : fn->params[i].second;
+        sig << ptype;
+    }
+    sig << ")->";
+    sig << (actualReturnType.empty() ? "void" : actualReturnType);
+
+    // restore environment first
+    env = oldEnv;
+
+    // define function symbol in current env with correct signature
+    if (!env->define(fn->name, sig.str(), false))
+    {
+        throw std::runtime_error("Function already defined: " + fn->name);
+    }
+
+    // restore return type
+    currentReturnType = oldReturn;
+    return;
+}
 
     // Unknown statement
     throw std::runtime_error("Unhandled statement in typechecker");
@@ -619,12 +630,23 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
             std::string L = inferExpr(bin->lhs);
             std::string R = inferExpr(bin->rhs);
 
+            // Handle string concatenation
             if (op == "+" && isStringType(L) && isStringType(R))
                 return "string";
 
-            if (!isNumericType(L) || !isNumericType(R))
-                throw std::runtime_error("Arithmetic requires numeric operands");
+            // Handle "any" type parameters (dynamic typing)
+            if (L == "any" || R == "any")
+            {
+                // If one operand is "any", we can't determine the result type at compile time
+                // For dynamic functions, assume the operation is valid and return "any"
+                return "any";
+            }
 
+            // Both operands must be numeric for arithmetic
+            if (!isNumericType(L) || !isNumericType(R))
+                throw std::runtime_error("Arithmetic requires numeric operands, got " + L + " and " + R);
+
+            // Return more specific type if both are known
             return (isFloatType(L) || isFloatType(R)) ? "float" : "int";
         }
 
@@ -633,6 +655,10 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
         {
             std::string L = inferExpr(bin->lhs);
             std::string R = inferExpr(bin->rhs);
+
+            // Handle "any" type - allow comparison of any types
+            if (L == "any" || R == "any")
+                return "bool";
 
             if (L != R && !(isNumericType(L) && isNumericType(R)))
                 throw std::runtime_error("Comparison requires same or compatible types, got " + L + " and " + R);
@@ -644,6 +670,10 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
         {
             std::string L = inferExpr(bin->lhs);
             std::string R = inferExpr(bin->rhs);
+
+            // Handle "any" type - allow comparison but result is still bool
+            if (L == "any" || R == "any")
+                return "bool";
 
             if (!isNumericType(L) || !isNumericType(R))
                 throw std::runtime_error("Comparison requires numeric types, got " + L + " and " + R);
@@ -811,123 +841,123 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
     // ArrayAssignExpr (array[index] = value) - in your AST it's an Expr node
     // ArrayExpr
 
-// ArrayAssignExpr (array[index] = value)
-if (auto aa = std::dynamic_pointer_cast<ArrayAssignExpr>(expr))
-{
-    // Instead of blindly calling inferExpr(aa->array) and requiring it to be an array,
-    // we try to be a bit smarter: allow "any" as a permissive element type (practical fix),
-    // and handle nested IndexExprs by peeling them where possible.
-
-    // CHECK MUTABILITY (works for Identifier base)
-    if (auto arrId = std::dynamic_pointer_cast<IdentifierExpr>(aa->array))
+    // ArrayAssignExpr (array[index] = value)
+    if (auto aa = std::dynamic_pointer_cast<ArrayAssignExpr>(expr))
     {
-        auto symOpt = env->lookup(arrId->name);
-        if (!symOpt.has_value())
-            throw std::runtime_error("Array variable not found: " + arrId->name);
+        // Instead of blindly calling inferExpr(aa->array) and requiring it to be an array,
+        // we try to be a bit smarter: allow "any" as a permissive element type (practical fix),
+        // and handle nested IndexExprs by peeling them where possible.
 
-        // Prevent mutating elements of immutable arrays
-        if (!symOpt->isMutable)
-            throw std::runtime_error("Cannot assign to element of immutable array (let): " + arrId->name);
-    }
-    else if (auto idxBase = std::dynamic_pointer_cast<IndexExpr>(aa->array))
-    {
-        // If top-level array expression is an IndexExpr, try to check mutability of the root identifier
-        // e.g., in a[1][0] -> check 'a' mutability.
-        ExprPtr cur = aa->array;
-        while (auto idx = std::dynamic_pointer_cast<IndexExpr>(cur))
+        // CHECK MUTABILITY (works for Identifier base)
+        if (auto arrId = std::dynamic_pointer_cast<IdentifierExpr>(aa->array))
         {
-            cur = idx->array;
+            auto symOpt = env->lookup(arrId->name);
+            if (!symOpt.has_value())
+                throw std::runtime_error("Array variable not found: " + arrId->name);
+
+            // Prevent mutating elements of immutable arrays
+            if (!symOpt->isMutable)
+                throw std::runtime_error("Cannot assign to element of immutable array (let): " + arrId->name);
         }
-        if (auto baseId = std::dynamic_pointer_cast<IdentifierExpr>(cur))
+        else if (auto idxBase = std::dynamic_pointer_cast<IndexExpr>(aa->array))
         {
-            auto symOpt = env->lookup(baseId->name);
-            if (symOpt.has_value() && !symOpt->isMutable)
-                throw std::runtime_error("Cannot assign to element of immutable array (let): " + baseId->name);
-        }
-    }
-
-    // Index must be int
-    std::string idxType = inferExpr(aa->index);
-    if (!isIntType(idxType))
-        throw std::runtime_error("Array index must be int");
-
-    // If the array expression itself is a literal array, we can do compile-time bounds check.
-    if (auto arrLit = std::dynamic_pointer_cast<ArrayExpr>(aa->array))
-    {
-        if (auto idxLit = std::dynamic_pointer_cast<LiteralExpr>(aa->index))
-        {
-            int indexValue = std::stoi(idxLit->value);
-            int arrSize = static_cast<int>(arrLit->elements.size());
-            if (indexValue < 0 || indexValue >= arrSize)
+            // If top-level array expression is an IndexExpr, try to check mutability of the root identifier
+            // e.g., in a[1][0] -> check 'a' mutability.
+            ExprPtr cur = aa->array;
+            while (auto idx = std::dynamic_pointer_cast<IndexExpr>(cur))
             {
-                throw std::runtime_error(
-                    "Array index out of bounds at compile time: " +
-                    std::to_string(indexValue) + " (array size " + std::to_string(arrSize) + ")");
+                cur = idx->array;
+            }
+            if (auto baseId = std::dynamic_pointer_cast<IdentifierExpr>(cur))
+            {
+                auto symOpt = env->lookup(baseId->name);
+                if (symOpt.has_value() && !symOpt->isMutable)
+                    throw std::runtime_error("Cannot assign to element of immutable array (let): " + baseId->name);
             }
         }
-    }
 
-    // Determine the element type we are assigning into.
-    // Instead of relying only on inferExpr(aa->array) (which for IndexExpr returns the element type and can be "any"),
-    // try to infer the *target* element type by:
-    //  - If aa->array is IndexExpr, infer the base array type and then compute target array element type.
-    //  - Fallback: call inferExpr(aa->array) and accept "any".
-    std::string targetArrayType;
-    if (auto idx = std::dynamic_pointer_cast<IndexExpr>(aa->array))
-    {
-        // infer the array type of the indexed expression's base (e.g., for a[1] -> infer type of 'a')
-        std::string baseArrType = inferExpr(idx->array);
+        // Index must be int
+        std::string idxType = inferExpr(aa->index);
+        if (!isIntType(idxType))
+            throw std::runtime_error("Array index must be int");
 
-        // If baseArrType is "any" we cannot statically prove the element is an array;
-        // be permissive: treat targetArrayType as "any".
-        if (isAnyType(baseArrType))
+        // If the array expression itself is a literal array, we can do compile-time bounds check.
+        if (auto arrLit = std::dynamic_pointer_cast<ArrayExpr>(aa->array))
         {
-            targetArrayType = "any";
+            if (auto idxLit = std::dynamic_pointer_cast<LiteralExpr>(aa->index))
+            {
+                int indexValue = std::stoi(idxLit->value);
+                int arrSize = static_cast<int>(arrLit->elements.size());
+                if (indexValue < 0 || indexValue >= arrSize)
+                {
+                    throw std::runtime_error(
+                        "Array index out of bounds at compile time: " +
+                        std::to_string(indexValue) + " (array size " + std::to_string(arrSize) + ")");
+                }
+            }
+        }
+
+        // Determine the element type we are assigning into.
+        // Instead of relying only on inferExpr(aa->array) (which for IndexExpr returns the element type and can be "any"),
+        // try to infer the *target* element type by:
+        //  - If aa->array is IndexExpr, infer the base array type and then compute target array element type.
+        //  - Fallback: call inferExpr(aa->array) and accept "any".
+        std::string targetArrayType;
+        if (auto idx = std::dynamic_pointer_cast<IndexExpr>(aa->array))
+        {
+            // infer the array type of the indexed expression's base (e.g., for a[1] -> infer type of 'a')
+            std::string baseArrType = inferExpr(idx->array);
+
+            // If baseArrType is "any" we cannot statically prove the element is an array;
+            // be permissive: treat targetArrayType as "any".
+            if (isAnyType(baseArrType))
+            {
+                targetArrayType = "any";
+            }
+            else
+            {
+                if (!isArrayType(baseArrType))
+                    throw std::runtime_error("Indexing requires array type, got " + baseArrType);
+
+                // type of aa->array (the result of one indexing) is the element type of the base array
+                targetArrayType = arrayElementType(baseArrType);
+            }
         }
         else
         {
-            if (!isArrayType(baseArrType))
-                throw std::runtime_error("Indexing requires array type, got " + baseArrType);
-
-            // type of aa->array (the result of one indexing) is the element type of the base array
-            targetArrayType = arrayElementType(baseArrType);
+            // not an IndexExpr (could be IdentifierExpr or ArrayExpr literal)
+            std::string arrType = inferExpr(aa->array);
+            targetArrayType = arrType;
         }
+
+        // If targetArrayType is "any", be permissive: allow assignment (type becomes whatever value is).
+        // Otherwise, require targetArrayType to be an array and check element compatibility.
+        std::string valType = inferExpr(aa->value);
+
+        if (isAnyType(targetArrayType) || targetArrayType == "any?")
+        {
+            // permissive: accept assignment and return the assigned value type
+            return valType;
+        }
+
+        if (!isArrayType(targetArrayType))
+            throw std::runtime_error("Array assignment target is not array");
+
+        std::string elemType = arrayElementType(targetArrayType);
+
+        // If array element type is "any", allow any assignment
+        if (isAnyType(elemType))
+            return valType;
+
+        // Otherwise enforce compatibility (allow int->float widening)
+        if (valType != elemType)
+        {
+            if (!(isIntType(valType) && isFloatType(elemType)))
+                throw std::runtime_error("Array assignment type mismatch: expected " + elemType + ", got " + valType);
+        }
+
+        return elemType;
     }
-    else
-    {
-        // not an IndexExpr (could be IdentifierExpr or ArrayExpr literal)
-        std::string arrType = inferExpr(aa->array);
-        targetArrayType = arrType;
-    }
-
-    // If targetArrayType is "any", be permissive: allow assignment (type becomes whatever value is).
-    // Otherwise, require targetArrayType to be an array and check element compatibility.
-    std::string valType = inferExpr(aa->value);
-
-    if (isAnyType(targetArrayType) || targetArrayType == "any?")
-    {
-        // permissive: accept assignment and return the assigned value type
-        return valType;
-    }
-
-    if (!isArrayType(targetArrayType))
-        throw std::runtime_error("Array assignment target is not array");
-
-    std::string elemType = arrayElementType(targetArrayType);
-
-    // If array element type is "any", allow any assignment
-    if (isAnyType(elemType))
-        return valType;
-
-    // Otherwise enforce compatibility (allow int->float widening)
-    if (valType != elemType)
-    {
-        if (!(isIntType(valType) && isFloatType(elemType)))
-            throw std::runtime_error("Array assignment type mismatch: expected " + elemType + ", got " + valType);
-    }
-
-    return elemType;
-}
 
     // ArrayExpr - Updated to handle dynamic/heterogeneous arrays
     if (auto arr = std::dynamic_pointer_cast<ArrayExpr>(expr))

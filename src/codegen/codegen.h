@@ -17,6 +17,8 @@ namespace nasm
         std::unordered_map<std::string, int> varTable;
         std::vector<std::string> dataSection;
 
+        
+
         std::string newLabel(const std::string &prefix)
         {
             return prefix + std::to_string(labelCounter++);
@@ -34,6 +36,7 @@ namespace nasm
         }
 
         std::unordered_map<std::string, std::string> exprTypes;
+        std::unordered_map<std::string, std::string> functionReturnTypes;
 
         // Escape double quotes and backslashes for db "..." emission
         static std::string escapeString(const std::string &in)
@@ -81,6 +84,19 @@ namespace nasm
                 auto it = varTypes.find(id->name);
                 return (it != varTypes.end()) ? it->second : "int";
             }
+            // ADD this case for function calls:
+            else if (auto call = std::dynamic_pointer_cast<CallExpr>(expr))
+            {
+                if (auto callee = std::dynamic_pointer_cast<IdentifierExpr>(call->callee))
+                {
+                    auto it = functionReturnTypes.find(callee->name);
+                    if (it != functionReturnTypes.end())
+                    {
+                        return it->second;
+                    }
+                }
+                return "int"; // default fallback
+            }
             else if (auto bin = std::dynamic_pointer_cast<BinaryExpr>(expr))
             {
                 if (bin->op == "=")
@@ -115,7 +131,6 @@ namespace nasm
 
             return "int"; // default
         }
-
         void emitPrintBool()
         {
             std::string lbl = newLabel("bool");
@@ -333,10 +348,6 @@ namespace nasm
                 for (auto &s : block->statements)
                     collectLocals(s);
             }
-            else if (auto f = std::dynamic_pointer_cast<FuncDecl>(stmt))
-            {
-                // nested function: ignore for now or separately handle
-            }
             else if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
             {
                 // allocate 8 bytes for every local (simple model)
@@ -362,8 +373,8 @@ namespace nasm
             {
                 // nothing
             }
+            // REMOVE the FuncDecl handling from here - it should only be in genStmt
         }
-
         void generate(StmtPtr program)
         {
             // --- Text section
@@ -404,14 +415,31 @@ namespace nasm
             }
             else if (auto f = std::dynamic_pointer_cast<FuncDecl>(stmt))
             {
+
+                functionReturnTypes[f->name] = f->returnType.empty() ? "int" : f->returnType;
                 // Reset per-function state
                 std::unordered_map<std::string, int> savedVarTable = varTable;
+                std::unordered_map<std::string, std::string> savedVarTypes = varTypes;
                 int savedStackOffset = stackOffset;
 
                 varTable.clear();
+                varTypes.clear();
                 stackOffset = 0;
 
-                // First pass: collect locals offsets
+                // FIRST: Add function parameters to varTable
+                int paramOffset = 16; // Start after saved rbp (8) and return address (8)
+
+                for (const auto &param : f->params)
+                {
+                    const std::string &paramName = param.first;
+                    const std::string &paramType = param.second.empty() ? "any" : param.second;
+
+                    varTable[paramName] = paramOffset;
+                    varTypes[paramName] = paramType;
+                    paramOffset += 8;
+                }
+
+                // THEN: Collect local variables (these get negative offsets)
                 collectLocals(f->body);
 
                 // Emit function label and prologue
@@ -419,19 +447,18 @@ namespace nasm
                 emit("    push rbp");
                 emit("    mov rbp, rsp");
 
-                int totalLocal = -stackOffset; // stackOffset is negative or zero
+                int totalLocal = -stackOffset; // stackOffset is negative or zero for locals
                 // Align stack to 16 bytes for ABI correctness
                 if (totalLocal % 16 != 0)
-                    totalLocal += 8; // make space so (rsp mod 16) == 0 after call
+                    totalLocal += 8;
 
                 if (totalLocal > 0)
                     emit("    sub rsp, " + std::to_string(totalLocal));
 
-                // Second pass: generate body code (var initializers and statements)
+                // Generate body code
                 genStmt(f->body);
 
-                // If the last statement of the function body wasn't a ReturnStmt, set rax = 0
-                // If the last statement of the function body wasn't a ReturnStmt, set rax = 0
+                // Handle return logic
                 bool endsWithReturn = false;
                 if (auto blk = std::dynamic_pointer_cast<BlockStmt>(f->body))
                 {
@@ -442,9 +469,6 @@ namespace nasm
                     }
                 }
 
-                // Only force RAX = 0 if the function body is completely empty (no statements).
-                // If there are statements, leave RAX alone so the last computed expression/value
-                // becomes the function's return value (convenient for REPL-like behavior).
                 if (!endsWithReturn)
                 {
                     bool bodyEmpty = true;
@@ -453,7 +477,6 @@ namespace nasm
 
                     if (bodyEmpty)
                         emit("    mov rax, 0");
-                    // otherwise: don't overwrite rax — assume last stmt left a sensible value in rax
                 }
 
                 // Epilogue
@@ -461,8 +484,9 @@ namespace nasm
                 emit("    pop rbp");
                 emit("    ret");
 
-                // restore outer function state
+                // Restore outer function state
                 varTable = savedVarTable;
+                varTypes = savedVarTypes;
                 stackOffset = savedStackOffset;
             }
             if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
@@ -476,7 +500,7 @@ namespace nasm
 
                 if (v->initializer)
                 {
-                    // Store variable type
+                    // Store variable type - handle different initializer types
                     if (auto litInit = std::dynamic_pointer_cast<LiteralExpr>(v->initializer))
                     {
                         if (litInit->type == "string")
@@ -486,16 +510,36 @@ namespace nasm
                         else if (litInit->type == "float")
                             varTypes[v->name] = "float";
                     }
+                    else if (auto callInit = std::dynamic_pointer_cast<CallExpr>(v->initializer))
+                    {
+                        // Handle function call initializers
+                        std::string returnType = getExprType(callInit);
+                        varTypes[v->name] = returnType;
+                    }
+                    else
+                    {
+                        // For other expression types, try to infer the type
+                        std::string inferredType = getExprType(v->initializer);
+                        varTypes[v->name] = inferredType;
+                    }
 
                     genExpr(v->initializer);
                     int off = varTable[v->name];
 
-                    // Handle float storage
+                    // Handle different storage types
                     auto it = varTypes.find(v->name);
-                    if (it != varTypes.end() && it->second == "float")
+                    if (it != varTypes.end())
                     {
-                        emit("    movq xmm0, rax");
-                        emit("    movsd " + slot(off) + ", xmm0");
+                        if (it->second == "float")
+                        {
+                            emit("    movq xmm0, rax");
+                            emit("    movsd " + slot(off) + ", xmm0");
+                        }
+                        else
+                        {
+                            // For strings and integers, store the value/pointer in rax
+                            emit("    mov " + slot(off) + ", rax");
+                        }
                     }
                     else
                     {
@@ -586,6 +630,12 @@ namespace nasm
                             }
                             return;
                         }
+                        else
+                        {
+                            // Handle other function calls
+                            genExpr(e->expr); // This will generate the call
+                            return;
+                        }
                     }
                 }
 
@@ -643,6 +693,7 @@ namespace nasm
 
                 emit(endLbl + ":");
             }
+
             else if (auto t = std::dynamic_pointer_cast<TimesStmt>(stmt))
             {
                 // Generate code for the loop count
@@ -869,6 +920,7 @@ namespace nasm
                         emit("    mov " + slot(off) + ", rax");
                     }
                 }
+
                 else
                 {
                     // Check if we're dealing with float operations
@@ -1006,6 +1058,31 @@ namespace nasm
                     emit("    cmp rax, 0");
                     emit("    sete al");
                     emit("    movzx rax, al");
+                }
+            }
+            else if (auto call = std::dynamic_pointer_cast<CallExpr>(expr))
+            {
+                // Generate arguments and push them on stack (reverse order)
+                for (int i = call->args.size() - 1; i >= 0; i--)
+                {
+                    genExpr(call->args[i]);
+                    emit("    push rax");
+                }
+
+                // Call the function
+                if (auto callee = std::dynamic_pointer_cast<IdentifierExpr>(call->callee))
+                {
+                    emit("    call " + callee->name);
+
+                    // Clean up arguments from stack
+                    if (call->args.size() > 0)
+                    {
+                        emit("    add rsp, " + std::to_string(call->args.size() * 8));
+                    }
+                }
+                else
+                {
+                    throw std::runtime_error("Only direct function calls supported");
                 }
             }
         }
