@@ -16,8 +16,9 @@ namespace nasm
         int stackOffset = 0; // negative offsets from rbp (e.g. -8, -16)
         std::unordered_map<std::string, int> varTable;
         std::vector<std::string> dataSection;
-
-        
+        std::vector<std::shared_ptr<FuncDecl>> deferredFunctions;
+        std::vector<std::unordered_map<std::string, std::string>> scopeStack; // for nested variable scopes
+        int scopeLevel = 0;
 
         std::string newLabel(const std::string &prefix)
         {
@@ -37,6 +38,33 @@ namespace nasm
 
         std::unordered_map<std::string, std::string> exprTypes;
         std::unordered_map<std::string, std::string> functionReturnTypes;
+
+        void genStmtSkipNestedFunctions(const StmtPtr &stmt)
+        {
+            if (!stmt)
+                return;
+
+            if (auto block = std::dynamic_pointer_cast<BlockStmt>(stmt))
+            {
+                for (auto &s : block->statements)
+                {
+                    // Skip nested function declarations - they're already deferred
+                    if (std::dynamic_pointer_cast<FuncDecl>(s))
+                        continue;
+                    genStmt(s);
+                }
+            }
+            else if (auto f = std::dynamic_pointer_cast<FuncDecl>(stmt))
+            {
+                // Skip - this should have been deferred
+                return;
+            }
+            else
+            {
+                // For all other statement types, use normal genStmt
+                genStmt(stmt);
+            }
+        }
 
         // Escape double quotes and backslashes for db "..." emission
         static std::string escapeString(const std::string &in)
@@ -338,7 +366,7 @@ namespace nasm
         }
 
         // First pass: walk function body to assign stack offsets for local variables
-        void collectLocals(const StmtPtr &stmt)
+        void collectLocals(const StmtPtr &stmt, bool isTopLevel = false)
         {
             if (!stmt)
                 return;
@@ -346,62 +374,105 @@ namespace nasm
             if (auto block = std::dynamic_pointer_cast<BlockStmt>(stmt))
             {
                 for (auto &s : block->statements)
-                    collectLocals(s);
+                    collectLocals(s, isTopLevel);
             }
             else if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
+        {
+            if (varTable.find(v->name) == varTable.end())
             {
-                // allocate 8 bytes for every local (simple model)
                 stackOffset -= 8;
                 varTable[v->name] = stackOffset;
-                // don't recurse into initializer for allocation pass
+            }
+
+            if (v->initializer)
+            {
+                std::string inferredType = getExprType(v->initializer);
+                varTypes[v->name] = inferredType;
+
+                genExpr(v->initializer);
+                int off = varTable[v->name];
+
+                auto it = varTypes.find(v->name);
+                if (it != varTypes.end())
+                {
+                    if (it->second == "float")
+                    {
+                        emit("    movq xmm0, rax");
+                        emit("    movsd " + slot(off) + ", xmm0");
+                    }
+                    else
+                    {
+                        emit("    mov " + slot(off) + ", rax");
+                    }
+                }
+                else
+                {
+                    emit("    mov " + slot(off) + ", rax");
+                }
+            }
+            else
+            {
+                int off = varTable[v->name];
+                emit("    mov rax, 0");
+                emit("    mov " + slot(off) + ", rax");
+            }
+        }
+           
+            else if (auto f = std::dynamic_pointer_cast<FuncDecl>(stmt))
+            {
+                if (!isTopLevel)
+                {
+                    // This is a nested function - defer its generation
+                    deferredFunctions.push_back(f);
+                    // Don't recurse into the function body here
+                    return;
+                }
             }
             else if (auto i = std::dynamic_pointer_cast<IfStmt>(stmt))
             {
-                collectLocals(i->thenBranch);
+                collectLocals(i->thenBranch, isTopLevel);
                 if (i->elseBranch)
-                    collectLocals(i->elseBranch);
+                    collectLocals(i->elseBranch, isTopLevel);
             }
-            else if (auto e = std::dynamic_pointer_cast<ExprStmt>(stmt))
+            else if (auto w = std::dynamic_pointer_cast<WhileStmt>(stmt))
             {
-                // expressions don't introduce locals
+                collectLocals(w->body, isTopLevel);
             }
-            else if (auto p = std::dynamic_pointer_cast<PrintStmt>(stmt))
+            else if (auto t = std::dynamic_pointer_cast<TimesStmt>(stmt))
             {
-                // print argument might have var decls only in complex languages — ignore
+                collectLocals(t->body, isTopLevel);
             }
-            else if (auto r = std::dynamic_pointer_cast<ReturnStmt>(stmt))
-            {
-                // nothing
-            }
-            // REMOVE the FuncDecl handling from here - it should only be in genStmt
         }
         void generate(StmtPtr program)
+    {
+        // Clear any global state
+        deferredFunctions.clear();
+        
+        // --- Text section
+        emit("section .text");
+        emit("global _start");
+        emit("_start:");
+        emit("    call main");
+
+        // exit with main's return value
+        emit("    mov rdi, rax"); // exit code = main's return
+        emit("    mov rax, 60");  // syscall: exit
+        emit("    syscall");
+
+        genStmt(program);
+
+        // --- BSS for integer printing
+        emit("section .bss");
+        emit("num_buf: resb 32");
+
+        // --- Data section
+        if (!dataSection.empty())
         {
-            // --- Text section
-            emit("section .text");
-            emit("global _start");
-            emit("_start:");
-            emit("    call main");
-
-            // exit with main’s return value
-            emit("    mov rdi, rax"); // exit code = main’s return
-            emit("    mov rax, 60");  // syscall: exit
-            emit("    syscall");
-
-            genStmt(program);
-
-            // --- BSS for integer printing
-            emit("section .bss");
-            emit("num_buf: resb 32"); // must be at least 32, since code uses num_buf+31
-
-            // --- Data section
-            if (!dataSection.empty())
-            {
-                emit("section .data");
-                for (auto &d : dataSection)
-                    emit(d);
-            }
+            emit("section .data");
+            for (auto &d : dataSection)
+                emit(d);
         }
+    }
 
         void genStmt(const StmtPtr &stmt)
         {
@@ -415,18 +486,21 @@ namespace nasm
             }
             else if (auto f = std::dynamic_pointer_cast<FuncDecl>(stmt))
             {
-
                 functionReturnTypes[f->name] = f->returnType.empty() ? "int" : f->returnType;
-                // Reset per-function state
+
+                // Save current state
                 std::unordered_map<std::string, int> savedVarTable = varTable;
                 std::unordered_map<std::string, std::string> savedVarTypes = varTypes;
                 int savedStackOffset = stackOffset;
+                auto savedDeferred = deferredFunctions;
 
+                // Reset per-function state
                 varTable.clear();
                 varTypes.clear();
                 stackOffset = 0;
+                deferredFunctions.clear();
 
-                // FIRST: Add function parameters to varTable
+                // Add function parameters to varTable
                 int paramOffset = 16; // Start after saved rbp (8) and return address (8)
 
                 for (const auto &param : f->params)
@@ -439,24 +513,23 @@ namespace nasm
                     paramOffset += 8;
                 }
 
-                // THEN: Collect local variables (these get negative offsets)
-                collectLocals(f->body);
+                // Collect local variables (this will defer nested functions)
+                collectLocals(f->body, false);
 
                 // Emit function label and prologue
                 emit(f->name + ":");
                 emit("    push rbp");
                 emit("    mov rbp, rsp");
 
-                int totalLocal = -stackOffset; // stackOffset is negative or zero for locals
-                // Align stack to 16 bytes for ABI correctness
+                int totalLocal = -stackOffset;
                 if (totalLocal % 16 != 0)
                     totalLocal += 8;
 
                 if (totalLocal > 0)
                     emit("    sub rsp, " + std::to_string(totalLocal));
 
-                // Generate body code
-                genStmt(f->body);
+                // Generate body code (skipping nested function declarations)
+                genStmtSkipNestedFunctions(f->body);
 
                 // Handle return logic
                 bool endsWithReturn = false;
@@ -484,10 +557,17 @@ namespace nasm
                 emit("    pop rbp");
                 emit("    ret");
 
+                // Now generate all the nested functions that were deferred
+                for (auto &nestedFunc : deferredFunctions)
+                {
+                    genStmt(nestedFunc);
+                }
+
                 // Restore outer function state
                 varTable = savedVarTable;
                 varTypes = savedVarTypes;
                 stackOffset = savedStackOffset;
+                deferredFunctions = savedDeferred;
             }
             if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
             {

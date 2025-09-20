@@ -1,9 +1,7 @@
-fn add(a,b){
-    return a+b
-}
-
 fn main() {
     var b = 30;
-   
+    fn add(a,b){
+        return a+b
+    }
     print(add(b,20))
 }
