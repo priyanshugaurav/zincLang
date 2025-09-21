@@ -127,15 +127,26 @@ namespace nasm
             }
             else if (auto bin = std::dynamic_pointer_cast<BinaryExpr>(expr))
             {
-                if (bin->op == "=")
+                // Assignment operators return the type of RHS
+                if (bin->op == "=" || bin->op == "+=" || bin->op == "-=" ||
+                    bin->op == "*=" || bin->op == "/=" || bin->op == "%=" ||
+                    bin->op == "&=" || bin->op == "|=" || bin->op == "^=" ||
+                    bin->op == "<<=" || bin->op == ">>=")
                 {
                     return getExprType(bin->rhs);
                 }
-                // Comparison operators return bool
+                // Comparison and logical operators return bool
                 else if (bin->op == "==" || bin->op == "!=" || bin->op == "<" ||
-                         bin->op == "<=" || bin->op == ">" || bin->op == ">=")
+                         bin->op == "<=" || bin->op == ">" || bin->op == ">=" ||
+                         bin->op == "&&" || bin->op == "||")
                 {
                     return "bool";
+                }
+                // Bitwise and modulo operators preserve integer type
+                else if (bin->op == "&" || bin->op == "|" || bin->op == "^" ||
+                         bin->op == "<<" || bin->op == ">>" || bin->op == "%")
+                {
+                    return "int";
                 }
                 else
                 {
@@ -153,6 +164,8 @@ namespace nasm
             {
                 if (un->op == "!")
                     return "bool";
+                else if (un->op == "~")
+                    return "int";
                 else
                     return getExprType(un->rhs);
             }
@@ -377,47 +390,21 @@ namespace nasm
                     collectLocals(s, isTopLevel);
             }
             else if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
-        {
-            if (varTable.find(v->name) == varTable.end())
             {
-                stackOffset -= 8;
-                varTable[v->name] = stackOffset;
-            }
-
-            if (v->initializer)
-            {
-                std::string inferredType = getExprType(v->initializer);
-                varTypes[v->name] = inferredType;
-
-                genExpr(v->initializer);
-                int off = varTable[v->name];
-
-                auto it = varTypes.find(v->name);
-                if (it != varTypes.end())
+                if (varTable.find(v->name) == varTable.end())
                 {
-                    if (it->second == "float")
-                    {
-                        emit("    movq xmm0, rax");
-                        emit("    movsd " + slot(off) + ", xmm0");
-                    }
-                    else
-                    {
-                        emit("    mov " + slot(off) + ", rax");
-                    }
+                    stackOffset -= 8;
+                    varTable[v->name] = stackOffset;
                 }
-                else
+
+                if (v->initializer)
                 {
-                    emit("    mov " + slot(off) + ", rax");
+                    std::string inferredType = getExprType(v->initializer);
+                    varTypes[v->name] = inferredType;
                 }
+                // Don't generate any code here - just collect the variable info
             }
-            else
-            {
-                int off = varTable[v->name];
-                emit("    mov rax, 0");
-                emit("    mov " + slot(off) + ", rax");
-            }
-        }
-           
+
             else if (auto f = std::dynamic_pointer_cast<FuncDecl>(stmt))
             {
                 if (!isTopLevel)
@@ -444,35 +431,35 @@ namespace nasm
             }
         }
         void generate(StmtPtr program)
-    {
-        // Clear any global state
-        deferredFunctions.clear();
-        
-        // --- Text section
-        emit("section .text");
-        emit("global _start");
-        emit("_start:");
-        emit("    call main");
-
-        // exit with main's return value
-        emit("    mov rdi, rax"); // exit code = main's return
-        emit("    mov rax, 60");  // syscall: exit
-        emit("    syscall");
-
-        genStmt(program);
-
-        // --- BSS for integer printing
-        emit("section .bss");
-        emit("num_buf: resb 32");
-
-        // --- Data section
-        if (!dataSection.empty())
         {
-            emit("section .data");
-            for (auto &d : dataSection)
-                emit(d);
+            // Clear any global state
+            deferredFunctions.clear();
+
+            // --- Text section
+            emit("section .text");
+            emit("global _start");
+            emit("_start:");
+            emit("    call main");
+
+            // exit with main's return value
+            emit("    mov rdi, rax"); // exit code = main's return
+            emit("    mov rax, 60");  // syscall: exit
+            emit("    syscall");
+
+            genStmt(program);
+
+            // --- BSS for integer printing
+            emit("section .bss");
+            emit("num_buf: resb 32");
+
+            // --- Data section
+            if (!dataSection.empty())
+            {
+                emit("section .data");
+                for (auto &d : dataSection)
+                    emit(d);
+            }
         }
-    }
 
         void genStmt(const StmtPtr &stmt)
         {
@@ -648,7 +635,7 @@ namespace nasm
 
                             auto arg = call->args[0];
 
-                            // Check what type we're printing
+                            // Check if it's a string literal
                             if (auto lit = std::dynamic_pointer_cast<LiteralExpr>(arg))
                             {
                                 if (lit->type == "string")
@@ -662,36 +649,12 @@ namespace nasm
                                     emit("    lea rsi, [rel " + lbl + "]");
                                     emit("    mov rdx, " + std::to_string(lit->value.size()));
                                     emit("    syscall");
-                                    return;
-                                }
-                            }
-                            else if (auto idArg = std::dynamic_pointer_cast<IdentifierExpr>(arg))
-                            {
-                                auto it = varTypes.find(idArg->name);
-                                if (it != varTypes.end() && it->second == "string")
-                                {
-                                    int off = varTable[idArg->name];
-                                    emit("    mov rsi, " + slot(off));
-                                    std::string lenLbl = newLabel("strlen");
-                                    emit("    xor rcx, rcx");
-                                    emit(lenLbl + "_loop:");
-                                    emit("    cmp byte [rsi+rcx], 0");
-                                    emit("    je " + lenLbl + "_done");
-                                    emit("    inc rcx");
-                                    emit("    jmp " + lenLbl + "_loop");
-                                    emit(lenLbl + "_done:");
-                                    emit("    mov rdx, rcx");
-                                    emit("    mov rax, 1");
-                                    emit("    mov rdi, 1");
-                                    emit("    syscall");
-                                    return;
+                                    return; // ✅ This return is now correct - exits only the print handling
                                 }
                             }
 
-                            // Determine the type of the expression being printed
+                            // For all other expressions (including binary expressions)
                             std::string argType = getExprType(arg);
-
-                            // Generate the argument
                             genExpr(arg);
 
                             // Print based on the determined type
@@ -708,13 +671,13 @@ namespace nasm
                             {
                                 emitPrintRax();
                             }
-                            return;
+                            return; // ✅ This return is correct - exits only the print handling
                         }
                         else
                         {
                             // Handle other function calls
-                            genExpr(e->expr); // This will generate the call
-                            return;
+                            genExpr(e->expr);
+                            return; // ✅ This return is correct
                         }
                     }
                 }
@@ -980,11 +943,13 @@ namespace nasm
             }
             else if (auto bin = std::dynamic_pointer_cast<BinaryExpr>(expr))
             {
+                // Handle basic assignment only
                 if (bin->op == "=")
                 {
                     auto id = std::dynamic_pointer_cast<IdentifierExpr>(bin->lhs);
                     if (!id)
                         throw std::runtime_error("Invalid assignment target");
+
                     genExpr(bin->rhs);
                     int off = varTable[id->name];
 
@@ -1000,131 +965,124 @@ namespace nasm
                         emit("    mov " + slot(off) + ", rax");
                     }
                 }
+                // Handle logical operators with short-circuiting
+                else if (bin->op == "&&")
+                {
+                    std::string falseLbl = newLabel("and_false");
+                    std::string doneLbl = newLabel("and_done");
 
+                    genExpr(bin->lhs);
+                    emit("    cmp rax, 0");
+                    emit("    je " + falseLbl);
+
+                    genExpr(bin->rhs);
+                    emit("    cmp rax, 0");
+                    emit("    setne al");
+                    emit("    movzx rax, al");
+                    emit("    jmp " + doneLbl);
+
+                    emit(falseLbl + ":");
+                    emit("    mov rax, 0");
+                    emit(doneLbl + ":");
+                }
+                else if (bin->op == "||")
+                {
+                    std::string trueLbl = newLabel("or_true");
+                    std::string doneLbl = newLabel("or_done");
+
+                    genExpr(bin->lhs);
+                    emit("    cmp rax, 0");
+                    emit("    jne " + trueLbl);
+
+                    genExpr(bin->rhs);
+                    emit("    cmp rax, 0");
+                    emit("    setne al");
+                    emit("    movzx rax, al");
+                    emit("    jmp " + doneLbl);
+
+                    emit(trueLbl + ":");
+                    emit("    mov rax, 1");
+                    emit(doneLbl + ":");
+                }
                 else
                 {
-                    // Check if we're dealing with float operations
-                    bool leftIsFloat = false, rightIsFloat = false;
+                    // Regular binary operations
+                    genExpr(bin->lhs);
+                    emit("    push rax");
+                    genExpr(bin->rhs);
+                    emit("    mov rbx, rax"); // rbx = right operand
+                    emit("    pop rax");      // rax = left operand
 
-                    // Check left operand
-                    if (auto leftId = std::dynamic_pointer_cast<IdentifierExpr>(bin->lhs))
+                    if (bin->op == "+")
+                        emit("    add rax, rbx");
+                    else if (bin->op == "-")
+                        emit("    sub rax, rbx");
+                    else if (bin->op == "*")
+                        emit("    imul rax, rbx");
+                    else if (bin->op == "/")
                     {
-                        auto it = varTypes.find(leftId->name);
-                        leftIsFloat = (it != varTypes.end() && it->second == "float");
+                        emit("    cqo");
+                        emit("    idiv rbx");
                     }
-                    else if (auto leftLit = std::dynamic_pointer_cast<LiteralExpr>(bin->lhs))
+                    else if (bin->op == "%")
                     {
-                        leftIsFloat = (leftLit->type == "float");
+                        emit("    cqo");
+                        emit("    idiv rbx");
+                        emit("    mov rax, rdx");
                     }
-
-                    // Check right operand
-                    if (auto rightId = std::dynamic_pointer_cast<IdentifierExpr>(bin->rhs))
+                    // Bitwise operators
+                    else if (bin->op == "&")
+                        emit("    and rax, rbx");
+                    else if (bin->op == "|")
+                        emit("    or rax, rbx");
+                    else if (bin->op == "^")
+                        emit("    xor rax, rbx");
+                    else if (bin->op == "<<")
                     {
-                        auto it = varTypes.find(rightId->name);
-                        rightIsFloat = (it != varTypes.end() && it->second == "float");
+                        emit("    mov rcx, rbx");
+                        emit("    shl rax, cl");
                     }
-                    else if (auto rightLit = std::dynamic_pointer_cast<LiteralExpr>(bin->rhs))
+                    else if (bin->op == ">>")
                     {
-                        rightIsFloat = (rightLit->type == "float");
+                        emit("    mov rcx, rbx");
+                        emit("    sar rax, cl");
                     }
-
-                    if (leftIsFloat || rightIsFloat)
+                    // Comparison operators
+                    else if (bin->op == "==")
                     {
-                        // Floating-point arithmetic
-                        genExpr(bin->lhs);
-                        if (!leftIsFloat)
-                        {
-                            // Convert integer to float
-                            emit("    cvtsi2sd xmm0, rax");
-                        }
-                        else
-                        {
-                            emit("    movq xmm0, rax");
-                        }
-                        emit("    sub rsp, 8");
-                        emit("    movsd [rsp], xmm0");
-
-                        genExpr(bin->rhs);
-                        if (!rightIsFloat)
-                        {
-                            // Convert integer to float
-                            emit("    cvtsi2sd xmm1, rax");
-                        }
-                        else
-                        {
-                            emit("    movq xmm1, rax");
-                        }
-
-                        emit("    movsd xmm0, [rsp]");
-                        emit("    add rsp, 8");
-
-                        if (bin->op == "+")
-                            emit("    addsd xmm0, xmm1");
-                        else if (bin->op == "-")
-                            emit("    subsd xmm0, xmm1");
-                        else if (bin->op == "*")
-                            emit("    mulsd xmm0, xmm1");
-                        else if (bin->op == "/")
-                            emit("    divsd xmm0, xmm1");
-
-                        emit("    movq rax, xmm0");
+                        emit("    cmp rax, rbx");
+                        emit("    sete al");
+                        emit("    movzx rax, al");
                     }
-                    else
+                    else if (bin->op == "!=")
                     {
-                        // Integer arithmetic (existing code)
-                        genExpr(bin->lhs);
-                        emit("    push rax");
-                        genExpr(bin->rhs);
-                        emit("    mov rbx, rax");
-                        emit("    pop rax");
-
-                        if (bin->op == "+")
-                            emit("    add rax, rbx");
-                        else if (bin->op == "-")
-                            emit("    sub rax, rbx");
-                        else if (bin->op == "*")
-                            emit("    imul rax, rbx");
-                        else if (bin->op == "/")
-                        {
-                            emit("    cqo");
-                            emit("    idiv rbx");
-                        }
-                        else if (bin->op == "==")
-                        {
-                            emit("    cmp rax, rbx");
-                            emit("    sete al");
-                            emit("    movzx rax, al");
-                        }
-                        else if (bin->op == "!=")
-                        {
-                            emit("    cmp rax, rbx");
-                            emit("    setne al");
-                            emit("    movzx rax, al");
-                        }
-                        else if (bin->op == "<")
-                        {
-                            emit("    cmp rax, rbx");
-                            emit("    setl al");
-                            emit("    movzx rax, al");
-                        }
-                        else if (bin->op == "<=")
-                        {
-                            emit("    cmp rax, rbx");
-                            emit("    setle al");
-                            emit("    movzx rax, al");
-                        }
-                        else if (bin->op == ">")
-                        {
-                            emit("    cmp rax, rbx");
-                            emit("    setg al");
-                            emit("    movzx rax, al");
-                        }
-                        else if (bin->op == ">=")
-                        {
-                            emit("    cmp rax, rbx");
-                            emit("    setge al");
-                            emit("    movzx rax, al");
-                        }
+                        emit("    cmp rax, rbx");
+                        emit("    setne al");
+                        emit("    movzx rax, al");
+                    }
+                    else if (bin->op == "<")
+                    {
+                        emit("    cmp rax, rbx");
+                        emit("    setl al");
+                        emit("    movzx rax, al");
+                    }
+                    else if (bin->op == "<=")
+                    {
+                        emit("    cmp rax, rbx");
+                        emit("    setle al");
+                        emit("    movzx rax, al");
+                    }
+                    else if (bin->op == ">")
+                    {
+                        emit("    cmp rax, rbx");
+                        emit("    setg al");
+                        emit("    movzx rax, al");
+                    }
+                    else if (bin->op == ">=")
+                    {
+                        emit("    cmp rax, rbx");
+                        emit("    setge al");
+                        emit("    movzx rax, al");
                     }
                 }
             }
@@ -1132,13 +1090,15 @@ namespace nasm
             {
                 genExpr(un->rhs);
                 if (un->op == "-")
-                    emit("    imul rax, -1");
+                    emit("    neg rax");
                 else if (un->op == "!")
                 {
                     emit("    cmp rax, 0");
                     emit("    sete al");
                     emit("    movzx rax, al");
                 }
+                else if (un->op == "~") // Bitwise NOT
+                    emit("    not rax");
             }
             else if (auto call = std::dynamic_pointer_cast<CallExpr>(expr))
             {

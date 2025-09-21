@@ -1,7 +1,10 @@
 fn main() {
-    var b = 30;
-    fn add(a,b){
-        return a+b
-    }
-    print(add(b,20))
+    print(1 + 0);  // Should print 0
+    print("a")
+    print(7 % 4);  // Should print 1  
+    print("a")
+    print(5 | 3);  // Should print 7
+    print("a")
+    print(5 ^ 3);  // Should print 6
+    print("a")
 }

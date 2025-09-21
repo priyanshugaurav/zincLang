@@ -213,6 +213,56 @@ StmtPtr Parser::statement()
     return expressionStatement();
 }
 
+// Add this method between logicalAnd() and equality()
+ExprPtr Parser::bitwiseOr()
+{
+    ExprPtr expr = bitwiseXor();
+    while (match({TokenType::BitOr}))
+    {
+        Token op = previous();
+        ExprPtr right = bitwiseXor();
+        expr = std::make_shared<BinaryExpr>(expr, op.value, right);
+    }
+    return expr;
+}
+
+ExprPtr Parser::bitwiseXor()
+{
+    ExprPtr expr = bitwiseAnd();
+    while (match({TokenType::BitXor}))
+    {
+        Token op = previous();
+        ExprPtr right = bitwiseAnd();
+        expr = std::make_shared<BinaryExpr>(expr, op.value, right);
+    }
+    return expr;
+}
+
+ExprPtr Parser::bitwiseAnd()
+{
+    ExprPtr expr = shift();
+    while (match({TokenType::BitAnd}))
+    {
+        Token op = previous();
+        ExprPtr right = shift();
+        expr = std::make_shared<BinaryExpr>(expr, op.value, right);
+    }
+    return expr;
+}
+
+ExprPtr Parser::shift()
+{
+    ExprPtr expr = equality();
+    while (match({TokenType::ShiftLeft, TokenType::ShiftRight}))
+    {
+        Token op = previous();
+        ExprPtr right = equality();
+        expr = std::make_shared<BinaryExpr>(expr, op.value, right);
+    }
+    return expr;
+}
+
+
 StmtPtr Parser::ifStatement()
 {
     // No need to consume 'if' here because it's already matched in `statement()`
@@ -466,11 +516,11 @@ ExprPtr Parser::logicalOr()
 
 ExprPtr Parser::logicalAnd()
 {
-    ExprPtr expr = equality();
+    ExprPtr expr = bitwiseOr();  // Change from equality() to bitwiseOr()
     while (match({TokenType::AndAnd}))
     {
         Token op = previous();
-        ExprPtr right = equality();
+        ExprPtr right = bitwiseOr();  // Change from equality() to bitwiseOr()
         expr = std::make_shared<BinaryExpr>(expr, op.value, right);
     }
     return expr;

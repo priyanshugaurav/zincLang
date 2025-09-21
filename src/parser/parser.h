@@ -60,6 +60,11 @@ private:
     ExprPtr primary();
     ExprPtr arrayLiteral();
 
+    ExprPtr bitwiseOr();
+    ExprPtr bitwiseXor();
+    ExprPtr bitwiseAnd();
+    ExprPtr shift();
+
     std::string parseType();
     ExprPtr ifExpression();
 

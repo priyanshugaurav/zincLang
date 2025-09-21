@@ -441,88 +441,88 @@ void TypeChecker::checkStmt(const StmtPtr &stmt)
     // FuncDecl
     // REPLACE your FuncDecl handling in checkStmt with this:
 
-if (auto fn = std::dynamic_pointer_cast<FuncDecl>(stmt))
-{
-    // Check body with a new env: params in scope
-    auto oldEnv = env;
-    env = std::make_shared<Environment>(oldEnv);
-
-    // define params (use "any" for missing param types)
-    for (auto &p : fn->params)
+    if (auto fn = std::dynamic_pointer_cast<FuncDecl>(stmt))
     {
-        const std::string &pname = p.first;
-        const std::string ptype = p.second.empty() ? "any" : p.second;
-        if (!env->define(pname, ptype, false))
+        // Check body with a new env: params in scope
+        auto oldEnv = env;
+        env = std::make_shared<Environment>(oldEnv);
+
+        // define params (use "any" for missing param types)
+        for (auto &p : fn->params)
         {
-            throw std::runtime_error("Parameter name already used in function '" + fn->name + "': " + pname);
+            const std::string &pname = p.first;
+            const std::string ptype = p.second.empty() ? "any" : p.second;
+            if (!env->define(pname, ptype, false))
+            {
+                throw std::runtime_error("Parameter name already used in function '" + fn->name + "': " + pname);
+            }
         }
-    }
 
-    // set current return type
-    std::string oldReturn = currentReturnType;
+        // set current return type
+        std::string oldReturn = currentReturnType;
 
-    // if no declared return type, enable inference mode
-    if (fn->returnType.empty())
-        currentReturnType = "__INFER_RET__";
-    else
-        currentReturnType = fn->returnType;
+        // if no declared return type, enable inference mode
+        if (fn->returnType.empty())
+            currentReturnType = "__INFER_RET__";
+        else
+            currentReturnType = fn->returnType;
 
-    // body should be a BlockStmt normally
-    if (auto bodyBlock = std::dynamic_pointer_cast<BlockStmt>(fn->body))
-    {
-        checkBlock(bodyBlock->statements);
-    }
-    else
-    {
-        // single-statement function bodies (not typical) - check directly
-        checkStmt(fn->body);
-    }
+        // body should be a BlockStmt normally
+        if (auto bodyBlock = std::dynamic_pointer_cast<BlockStmt>(fn->body))
+        {
+            checkBlock(bodyBlock->statements);
+        }
+        else
+        {
+            // single-statement function bodies (not typical) - check directly
+            checkStmt(fn->body);
+        }
 
-    // If function had no declared return type and inference left it as "__INFER_RET__",
-    // it means no return statements were present -> treat as void (no value returned).
-    std::string actualReturnType;
-    if (fn->returnType.empty() && currentReturnType == "__INFER_RET__")
-    {
-        actualReturnType = "void";
-    }
-    else if (fn->returnType.empty())
-    {
-        // Function had no declared return type but we inferred one
-        actualReturnType = currentReturnType;
-    }
-    else
-    {
-        // Function had explicit return type
-        actualReturnType = fn->returnType;
-    }
+        // If function had no declared return type and inference left it as "__INFER_RET__",
+        // it means no return statements were present -> treat as void (no value returned).
+        std::string actualReturnType;
+        if (fn->returnType.empty() && currentReturnType == "__INFER_RET__")
+        {
+            actualReturnType = "void";
+        }
+        else if (fn->returnType.empty())
+        {
+            // Function had no declared return type but we inferred one
+            actualReturnType = currentReturnType;
+        }
+        else
+        {
+            // Function had explicit return type
+            actualReturnType = fn->returnType;
+        }
 
-    // NOW build function type string with the correct return type
-    std::ostringstream sig;
-    sig << "fn(";
-    for (size_t i = 0; i < fn->params.size(); ++i)
-    {
-        if (i)
-            sig << ",";
-        // params[i].second may be empty -> treat as "any"
-        std::string ptype = fn->params[i].second.empty() ? "any" : fn->params[i].second;
-        sig << ptype;
+        // NOW build function type string with the correct return type
+        std::ostringstream sig;
+        sig << "fn(";
+        for (size_t i = 0; i < fn->params.size(); ++i)
+        {
+            if (i)
+                sig << ",";
+            // params[i].second may be empty -> treat as "any"
+            std::string ptype = fn->params[i].second.empty() ? "any" : fn->params[i].second;
+            sig << ptype;
+        }
+        sig << ")->";
+        sig << (actualReturnType.empty() ? "void" : actualReturnType);
+
+        // restore environment first
+        env = oldEnv;
+
+        // define function symbol in current env with correct signature
+        if (!env->define(fn->name, sig.str(), false))
+        {
+            throw std::runtime_error("Function already defined: " + fn->name);
+        }
+
+        // restore return type
+        currentReturnType = oldReturn;
+        return;
     }
-    sig << ")->";
-    sig << (actualReturnType.empty() ? "void" : actualReturnType);
-
-    // restore environment first
-    env = oldEnv;
-
-    // define function symbol in current env with correct signature
-    if (!env->define(fn->name, sig.str(), false))
-    {
-        throw std::runtime_error("Function already defined: " + fn->name);
-    }
-
-    // restore return type
-    currentReturnType = oldReturn;
-    return;
-}
 
     // Unknown statement
     throw std::runtime_error("Unhandled statement in typechecker");
@@ -693,6 +693,26 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
             return "bool";
         }
 
+        // ADD THE BITWISE OPERATORS HERE:
+        // ---------------- BITWISE OPERATORS ----------------
+        if (op == "&" || op == "|" || op == "^" || op == "<<" || op == ">>")
+        {
+            std::string L = inferExpr(bin->lhs);
+            std::string R = inferExpr(bin->rhs);
+
+            // Handle "any" type parameters (dynamic typing)
+            if (L == "any" || R == "any")
+            {
+                return "any";
+            }
+
+            // Both operands must be integers for bitwise operations
+            if (!isIntType(L) || !isIntType(R))
+                throw std::runtime_error("Bitwise operators require integer operands, got " + L + " and " + R);
+
+            return "int";
+        }
+
         throw std::runtime_error("Unknown or unsupported binary operator: " + op);
     }
 
@@ -713,6 +733,15 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
             if (operandType != "bool")
                 throw std::runtime_error("Unary ! requires bool type, got " + operandType);
             return "bool";
+        }
+
+        // ---------------- BITWISE NOT (unary) ----------------
+        // Also add this to your UnaryExpr section:
+        if (u->op == "~")
+        {
+            if (!isIntType(operandType))
+                throw std::runtime_error("Bitwise NOT requires integer type, got " + operandType);
+            return "int";
         }
 
         throw std::runtime_error("Unsupported unary operator: " + u->op);
