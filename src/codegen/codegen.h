@@ -112,6 +112,24 @@ namespace nasm
                 auto it = varTypes.find(id->name);
                 return (it != varTypes.end()) ? it->second : "int";
             }
+            else if (auto ifExpr = std::dynamic_pointer_cast<IfExpr>(expr))
+            {
+                std::string thenType = getExprType(ifExpr->thenBranch);
+                std::string elseType = getExprType(ifExpr->elseBranch);
+
+                // If both branches have the same type, return that type
+                if (thenType == elseType)
+                    return thenType;
+
+                // If one is float and the other is int, promote to float
+                if ((thenType == "float" && elseType == "int") ||
+                    (thenType == "int" && elseType == "float"))
+                    return "float";
+
+                // For other mixed types, default to the then branch type
+                // You might want different logic here depending on your language semantics
+                return thenType;
+            }
             // ADD this case for function calls:
             else if (auto call = std::dynamic_pointer_cast<CallExpr>(expr))
             {
@@ -764,6 +782,7 @@ namespace nasm
 
                 emit(endLbl + ":");
             }
+
             else if (auto w = std::dynamic_pointer_cast<WhileStmt>(stmt))
             {
                 std::string startLbl = newLabel(".Lwhile_start");
@@ -1289,6 +1308,43 @@ namespace nasm
                         emit("    mov " + slot(off) + ", rax");
                     }
                 }
+            }
+            else if (auto ifExpr = std::dynamic_pointer_cast<IfExpr>(expr))
+            {
+                std::string elseLbl = newLabel("if_expr_else");
+                std::string doneLbl = newLabel("if_expr_done");
+
+                std::string thenType = getExprType(ifExpr->thenBranch);
+                std::string elseType = getExprType(ifExpr->elseBranch);
+                bool resultIsFloat = (thenType == "float" || elseType == "float");
+
+                // Generate condition
+                genExpr(ifExpr->condition);
+                emit("    cmp rax, 0");
+                emit("    je " + elseLbl);
+
+                // Generate then expression
+                genExpr(ifExpr->thenBranch);
+                if (resultIsFloat && thenType != "float")
+                {
+                    // Convert int to float
+                    emit("    cvtsi2sd xmm0, rax");
+                    emit("    movq rax, xmm0");
+                }
+                emit("    jmp " + doneLbl);
+
+                // Generate else expression
+                emit(elseLbl + ":");
+                genExpr(ifExpr->elseBranch);
+                if (resultIsFloat && elseType != "float")
+                {
+                    // Convert int to float
+                    emit("    cvtsi2sd xmm0, rax");
+                    emit("    movq rax, xmm0");
+                }
+
+                emit(doneLbl + ":");
+                // Result is now in rax (with proper type conversion)
             }
             else if (auto call = std::dynamic_pointer_cast<CallExpr>(expr))
             {
