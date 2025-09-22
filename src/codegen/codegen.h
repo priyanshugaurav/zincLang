@@ -218,7 +218,14 @@ namespace nasm
 
         void emitPrintDouble()
         {
-            std::string lbl = newLabel("dbl");
+            // Generate all labels at once to avoid contamination
+            std::string baseLbl = newLabel("dbl");
+            std::string positiveLbl = baseLbl + "_positive";
+            std::string fracOkLbl = baseLbl + "_frac_ok";
+            std::string fracPositiveLbl = baseLbl + "_frac_positive";
+            std::string digitLoopLbl = baseLbl + "_digit_loop";
+            std::string trimLoopLbl = baseLbl + "_trim_loop";
+            std::string trimDoneLbl = baseLbl + "_trim_done";
 
             emit("    push rbx");
             emit("    push r12");
@@ -230,7 +237,7 @@ namespace nasm
             // Handle negative numbers
             emit("    xorpd xmm2, xmm2"); // zero
             emit("    comisd xmm0, xmm2");
-            emit("    jae " + lbl + "_positive");
+            emit("    jae " + positiveLbl);
 
             // Print minus sign and make positive
             emit("    mov rax, 1");
@@ -244,7 +251,7 @@ namespace nasm
             emit("    xorpd xmm0, xmm1"); // flip sign bit to make positive
             emit("    movsd [rsp], xmm0");
 
-            emit(lbl + "_positive:");
+            emit(positiveLbl + ":");
 
             // Get integer part
             emit("    movsd xmm0, [rsp]");
@@ -274,14 +281,14 @@ namespace nasm
 
             // Clamp to valid range
             emit("    cmp rax, 1000000");
-            emit("    jl " + lbl + "_frac_ok");
+            emit("    jl " + fracOkLbl);
             emit("    mov rax, 999999");
-            emit(lbl + "_frac_ok:");
+            emit(fracOkLbl + ":");
 
             emit("    cmp rax, 0");
-            emit("    jge " + lbl + "_frac_positive");
+            emit("    jge " + fracPositiveLbl);
             emit("    mov rax, 0");
-            emit(lbl + "_frac_positive:");
+            emit(fracPositiveLbl + ":");
 
             // Convert fractional part to string - build from right to left
             emit("    mov rbx, rax");           // fractional part value
@@ -293,7 +300,7 @@ namespace nasm
             // Convert 6 digits with leading zeros
             emit("    mov rcx, 6"); // digit counter
 
-            emit(lbl + "_digit_loop:");
+            emit(digitLoopLbl + ":");
             emit("    xor rdx, rdx");
             emit("    mov rax, rbx");
             emit("    mov r8, 10");
@@ -302,23 +309,23 @@ namespace nasm
             emit("    dec r13");
             emit("    mov [r13], dl"); // store digit
             emit("    mov rbx, rax");  // update value
-            emit("    loop " + lbl + "_digit_loop");
+            emit("    loop " + digitLoopLbl);
 
             // Remove trailing zeros
             emit("    mov rsi, r14"); // start of digits
             emit("    add rsi, 5");   // point to last digit
             emit("    mov rcx, 6");   // max digits
 
-            emit(lbl + "_trim_loop:");
+            emit(trimLoopLbl + ":");
             emit("    cmp rcx, 1"); // keep at least 1 digit
-            emit("    jle " + lbl + "_trim_done");
+            emit("    jle " + trimDoneLbl);
             emit("    cmp byte [rsi], '0'");
-            emit("    jne " + lbl + "_trim_done");
+            emit("    jne " + trimDoneLbl);
             emit("    dec rcx");
             emit("    dec rsi");
-            emit("    jmp " + lbl + "_trim_loop");
+            emit("    jmp " + trimLoopLbl);
 
-            emit(lbl + "_trim_done:");
+            emit(trimDoneLbl + ":");
             // Print the fractional digits
             emit("    mov rax, 1");   // sys_write
             emit("    mov rdi, 1");   // stdout
@@ -332,7 +339,6 @@ namespace nasm
             emit("    pop r12");
             emit("    pop rbx");
         }
-
         // Add this to your constructor's dataSection initialization:
         // dataSection.push_back("half_const: dq 0.5"); // for rounding
         // Add this to your constructor's dataSection initialization:
@@ -345,11 +351,13 @@ namespace nasm
         // and computes the printed length correctly. It assumes the integer to print is in RAX.
         void emitPrintRax()
         {
-            std::string label = newLabel("conv");
+            std::string baseLbl = newLabel("conv");
+            std::string positiveLbl = baseLbl + "_positive";
+            std::string loopLbl = baseLbl + "_loop";
 
             // check for negative
             emit("    cmp rax, 0");
-            emit("    jge ." + label + "_positive");
+            emit("    jge " + positiveLbl);
 
             // save value, print '-', restore, then negate
             emit("    push rax");
@@ -361,7 +369,7 @@ namespace nasm
             emit("    pop rax");
             emit("    neg rax");
 
-            emit("." + label + "_positive:");
+            emit(positiveLbl + ":");
 
             // save registers
             emit("    push rbx");
@@ -373,14 +381,14 @@ namespace nasm
             emit("    mov byte [r12], 0");         // null terminator
             emit("    mov r13, r12");
 
-            emit("." + label + "_loop:");
+            emit(loopLbl + ":");
             emit("    xor rdx, rdx");
             emit("    div rbx"); // unsigned fine (rax non-negative now)
             emit("    add dl, '0'");
             emit("    dec r13");
             emit("    mov [r13], dl");
             emit("    test rax, rax");
-            emit("    jnz ." + label + "_loop");
+            emit("    jnz " + loopLbl);
 
             // write string
             emit("    mov rax, 1");
@@ -766,8 +774,8 @@ namespace nasm
             }
             else if (auto i = std::dynamic_pointer_cast<IfStmt>(stmt))
             {
-                std::string elseLbl = newLabel(".Lelse");
-                std::string endLbl = newLabel(".Lend");
+                std::string elseLbl = newLabel("Lelse");
+                std::string endLbl = newLabel("Lend");
 
                 genExpr(i->condition);
                 emit("    cmp rax, 0");
@@ -785,8 +793,8 @@ namespace nasm
 
             else if (auto w = std::dynamic_pointer_cast<WhileStmt>(stmt))
             {
-                std::string startLbl = newLabel(".Lwhile_start");
-                std::string endLbl = newLabel(".Lwhile_end");
+                std::string startLbl = newLabel("Lwhile_start");
+                std::string endLbl = newLabel("Lwhile_end");
 
                 emit(startLbl + ":");
 
@@ -806,134 +814,44 @@ namespace nasm
                 emit(endLbl + ":");
             }
 
-            else if (auto t = std::dynamic_pointer_cast<TimesStmt>(stmt))
-            {
-                // Generate code for the loop count
-                genExpr(t->count); // rax = number of iterations
+              else if (auto t = std::dynamic_pointer_cast<TimesStmt>(stmt))
+{
+    std::string startLbl = newLabel("Ltimes_start");
+    std::string endLbl   = newLabel("Ltimes_end");
 
-                std::string startLbl = newLabel(".Ltimes_start");
-                std::string endLbl = newLabel(".Ltimes_end");
+    // Determine count type and generate expression.
+    // If float, convert to int (truncate toward zero).
+    std::string countType = getExprType(t->count);
+    if (countType == "float")
+    {
+        genExpr(t->count);                 // expects result in xmm0
+        emit("    cvttsd2si rax, xmm0");   // rax <- (int) xmm0
+    }
+    else
+    {
+        genExpr(t->count);                 // expects result in rax for ints
+    }
 
-                // Save rax (iteration count) into a local variable on the stack
-                stackOffset -= 8;
-                int loopVarOffset = stackOffset;
-                emit("    mov " + slot(loopVarOffset) + ", rax");
+    // Allocate 16 bytes on the stack for the loop counter (keeps 16-byte alignment)
+    emit("    sub rsp, 16");
+    emit("    mov qword [rsp], rax");     // store counter at [rsp]
 
-                emit(startLbl + ":");
+    emit(startLbl + ":");
+    emit("    mov rax, qword [rsp]");
+    emit("    cmp rax, 0");
+    emit("    jle " + endLbl);            // exit if <= 0
 
-                // Load remaining count
-                emit("    mov rax, " + slot(loopVarOffset));
-                emit("    cmp rax, 0");
-                emit("    je " + endLbl);
+    // Loop body
+    genStmt(t->body);
 
-                // Generate loop body
-                genStmt(t->body);
+    // decrement counter and loop
+    emit("    dec qword [rsp]");
+    emit("    jmp " + startLbl);
 
-                // Decrement counter and store back
-                emit("    mov rax, " + slot(loopVarOffset));
-                emit("    sub rax, 1");
-                emit("    mov " + slot(loopVarOffset) + ", rax");
+    emit(endLbl + ":");
+    emit("    add rsp, 16");              // restore stack
+}
 
-                // Jump back to start
-                emit("    jmp " + startLbl);
-
-                emit(endLbl + ":");
-
-                // Restore stack
-                stackOffset += 8;
-            }
-
-            // else if (auto e = std::dynamic_pointer_cast<ExprStmt>(stmt))
-            // {
-            //     // Handle builtin "print" calls
-            //     if (auto call = std::dynamic_pointer_cast<CallExpr>(e->expr))
-            //     {
-            //         if (auto id = std::dynamic_pointer_cast<IdentifierExpr>(call->callee))
-            //         {
-            //             if (id->name == "print")
-            //             {
-            //                 if (call->args.size() != 1)
-            //                     throw std::runtime_error("print() expects exactly 1 argument");
-
-            //                 auto arg = call->args[0];
-
-            //                 // literal string => same as before (compile-time known length)
-            //                 if (auto lit = std::dynamic_pointer_cast<LiteralExpr>(arg))
-            //                 {
-            //                     if (lit->type == "string")
-            //                     {
-            //                         std::string lbl = "str_" + std::to_string(labelCounter++);
-            //                         std::string esc = escapeString(lit->value);
-            //                         dataSection.push_back(lbl + ": db \"" + esc + "\", 0");
-
-            //                         emit("    mov rax, 1");
-            //                         emit("    mov rdi, 1");
-            //                         emit("    lea rsi, [rel " + lbl + "]");
-            //                         emit("    mov rdx, " + std::to_string(lit->value.size()));
-            //                         emit("    syscall");
-            //                     }
-            //                     else
-            //                     {
-            //                         genExpr(arg);
-            //                         emitPrintRax();
-            //                     }
-            //                 }
-            //                 // identifier: might be a string variable, handle specially
-            //                 else if (auto idArg = std::dynamic_pointer_cast<IdentifierExpr>(arg))
-            //                 {
-            //                     // If the compiler knows this variable is a string, emit sys_write of the pointed data.
-            //                     auto it = varTypes.find(idArg->name);
-            //                     if (it != varTypes.end() && it->second == "string")
-            //                     {
-            //                         int off = varTable[idArg->name];
-
-            //                         // Load pointer into rsi (sys_write expects buffer in RSI)
-            //                         emit("    mov rsi, " + slot(off));
-
-            //                         // Compute length at runtime: use rcx as counter
-            //                         std::string lenLbl = newLabel("strlen");
-            //                         emit("    xor rcx, rcx");
-            //                         emit(lenLbl + "_loop:");
-            //                         emit("    cmp byte [rsi+rcx], 0");
-            //                         emit("    je " + lenLbl + "_done");
-            //                         emit("    inc rcx");
-            //                         emit("    jmp " + lenLbl + "_loop");
-            //                         emit(lenLbl + "_done:");
-            //                         // rcx now holds length
-            //                         emit("    mov rdx, rcx");
-            //                         emit("    mov rax, 1"); // sys_write
-            //                         emit("    mov rdi, 1"); // stdout
-            //                         emit("    syscall");
-            //                     }
-            //                     else if (it != varTypes.end() && it->second == "float")
-            //                     {
-            //                         int off = varTable[idArg->name];
-            //                         emit("    movq xmm0, " + slot(off));
-            //                         emitPrintDouble();
-            //                     }
-
-            //                     else
-            //                     {
-            //                         // Unknown type or not string: evaluate expression and print as integer
-            //                         genExpr(arg);
-            //                         emitPrintRax();
-            //                     }
-            //                 }
-            //                 else
-            //                 {
-            //                     // Other expression kinds: evaluate and print as integer by default
-            //                     genExpr(arg);
-            //                     emitPrintRax();
-            //                 }
-
-            //                 return; // handled print
-            //             }
-            //         }
-            //     }
-
-            //     // Normal expression statement
-            //     genExpr(e->expr);
-            // }
 
             else if (auto p = std::dynamic_pointer_cast<PrintStmt>(stmt))
             {

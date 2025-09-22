@@ -1,10 +1,8 @@
 fn main() {
-    fn sumTo(n) {
-        if (n == 0) {
-            return 0;
-        }
-        return n + sumTo(n - 1);
+    var i = 0
+    while(i<2){
+        print(2.25+2.75)
+        print(" ")
+        i = i+1
     }
-
-    print(sumTo(20));  // expected 55
 }
