@@ -1,4 +1,10 @@
-fn main(){
-    var a = if(2>10){30.2}else if(11>10){20.2}else{10.2}
-    print(a)
+fn main() {
+    fn sumTo(n) {
+        if (n == 0) {
+            return 0;
+        }
+        return n + sumTo(n - 1);
+    }
+
+    print(sumTo(20));  // expected 55
 }

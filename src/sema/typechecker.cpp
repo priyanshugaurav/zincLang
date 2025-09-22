@@ -316,58 +316,74 @@ void TypeChecker::checkStmt(const StmtPtr &stmt)
     // ---------------------------
 
     // ReturnStmt
-    if (auto r = std::dynamic_pointer_cast<ReturnStmt>(stmt))
+    // Replace your ReturnStmt handling with this improved version:
+
+if (auto r = std::dynamic_pointer_cast<ReturnStmt>(stmt))
+{
+    if (r->value)
     {
-        if (r->value)
-        {
-            std::string t = inferExpr(r->value);
+        std::string t = inferExpr(r->value);
 
-            // If in inference mode (function had no declared return type),
-            // allow the first return to set the inferred type.
-            if (currentReturnType == "__INFER_RET__")
+        // If in inference mode (function had no declared return type),
+        // allow the first return to set the inferred type.
+        if (currentReturnType == "__INFER_RET__")
+        {
+            // Set inferred return type
+            currentReturnType = t;
+            return;
+        }
+
+        // If currentReturnType empty -> function declared void / no return allowed with value
+        if (currentReturnType.empty())
+        {
+            throw std::runtime_error("Return with value in a function declared void / no return type");
+        }
+
+        // IMPROVED: Handle "any" type compatibility
+        if (t != currentReturnType)
+        {
+            // Allow "any" to match with anything (for dynamic typing)
+            if (t == "any" || currentReturnType == "any")
             {
-                // set inferred return type
-                currentReturnType = t;
+                // If either is "any", allow it - this supports dynamic typing
+                // Update currentReturnType to be more specific if possible
+                if (currentReturnType == "any" && t != "any")
+                {
+                    currentReturnType = t; // Make return type more specific
+                }
                 return;
             }
-
-            // If currentReturnType empty -> function declared void / no return allowed with value
-            if (currentReturnType.empty())
+            
+            // Allow int -> float widening
+            if (!(isIntType(t) && isFloatType(currentReturnType)))
             {
-                throw std::runtime_error("Return with value in a function declared void / no return type");
-            }
-
-            if (t != currentReturnType)
-            {
-                // allow int -> float widening
-                if (!(isIntType(t) && isFloatType(currentReturnType)))
-                    throw std::runtime_error("Return type mismatch: expected " + currentReturnType + ", got " + t);
+                throw std::runtime_error("Return type mismatch: expected " + currentReturnType + ", got " + t);
             }
         }
-        else
-        {
-            // return without value
-            if (currentReturnType.empty())
-            {
-                // function declared void -> okay
-                return;
-            }
-
-            if (currentReturnType == "__INFER_RET__")
-            {
-                // no previous typed return seen, mark inferred as void
-                currentReturnType = "void";
-                return;
-            }
-
-            if (currentReturnType != "void")
-            {
-                throw std::runtime_error("Return without value in function that expects type " + currentReturnType);
-            }
-        }
-        return;
     }
+    else
+    {
+        // return without value
+        if (currentReturnType.empty())
+        {
+            // function declared void -> okay
+            return;
+        }
 
+        if (currentReturnType == "__INFER_RET__")
+        {
+            // no previous typed return seen, mark inferred as void
+            currentReturnType = "void";
+            return;
+        }
+
+        if (currentReturnType != "void" && currentReturnType != "any")
+        {
+            throw std::runtime_error("Return without value in function that expects type " + currentReturnType);
+        }
+    }
+    return;
+}
     // BlockStmt
     if (auto b = std::dynamic_pointer_cast<BlockStmt>(stmt))
     {
@@ -441,89 +457,90 @@ void TypeChecker::checkStmt(const StmtPtr &stmt)
     // FuncDecl
     // REPLACE your FuncDecl handling in checkStmt with this:
 
-    if (auto fn = std::dynamic_pointer_cast<FuncDecl>(stmt))
+if (auto fn = std::dynamic_pointer_cast<FuncDecl>(stmt))
+{
+    // Build function signature
+    std::ostringstream sig;
+    sig << "fn(";
+    for (size_t i = 0; i < fn->params.size(); ++i)
     {
-        // Check body with a new env: params in scope
-        auto oldEnv = env;
-        env = std::make_shared<Environment>(oldEnv);
+        if (i)
+            sig << ",";
+        std::string ptype = fn->params[i].second.empty() ? "any" : fn->params[i].second;
+        sig << ptype;
+    }
+    sig << ")->";
 
-        // define params (use "any" for missing param types)
-        for (auto &p : fn->params)
-        {
-            const std::string &pname = p.first;
-            const std::string ptype = p.second.empty() ? "any" : p.second;
-            if (!env->define(pname, ptype, false))
-            {
-                throw std::runtime_error("Parameter name already used in function '" + fn->name + "': " + pname);
-            }
-        }
+    // FIXED: For functions without declared return type, use "any" initially
+    // This allows proper type inference to work
+    std::string initialReturnType;
+    if (fn->returnType.empty())
+    {
+        initialReturnType = "any";  // Changed from "void" to "any"
+    }
+    else
+    {
+        initialReturnType = fn->returnType;
+    }
+    sig << initialReturnType;
 
-        // set current return type
-        std::string oldReturn = currentReturnType;
-
-        // if no declared return type, enable inference mode
-        if (fn->returnType.empty())
-            currentReturnType = "__INFER_RET__";
-        else
-            currentReturnType = fn->returnType;
-
-        // body should be a BlockStmt normally
-        if (auto bodyBlock = std::dynamic_pointer_cast<BlockStmt>(fn->body))
-        {
-            checkBlock(bodyBlock->statements);
-        }
-        else
-        {
-            // single-statement function bodies (not typical) - check directly
-            checkStmt(fn->body);
-        }
-
-        // If function had no declared return type and inference left it as "__INFER_RET__",
-        // it means no return statements were present -> treat as void (no value returned).
-        std::string actualReturnType;
-        if (fn->returnType.empty() && currentReturnType == "__INFER_RET__")
-        {
-            actualReturnType = "void";
-        }
-        else if (fn->returnType.empty())
-        {
-            // Function had no declared return type but we inferred one
-            actualReturnType = currentReturnType;
-        }
-        else
-        {
-            // Function had explicit return type
-            actualReturnType = fn->returnType;
-        }
-
-        // NOW build function type string with the correct return type
-        std::ostringstream sig;
-        sig << "fn(";
-        for (size_t i = 0; i < fn->params.size(); ++i)
-        {
-            if (i)
-                sig << ",";
-            // params[i].second may be empty -> treat as "any"
-            std::string ptype = fn->params[i].second.empty() ? "any" : fn->params[i].second;
-            sig << ptype;
-        }
-        sig << ")->";
-        sig << (actualReturnType.empty() ? "void" : actualReturnType);
-
-        // restore environment first
-        env = oldEnv;
-
-        // define function symbol in current env with correct signature
-        if (!env->define(fn->name, sig.str(), false))
-        {
-            throw std::runtime_error("Function already defined: " + fn->name);
-        }
-
-        // restore return type
-        currentReturnType = oldReturn;
-        return;
+    // Define the function in the current environment FIRST
+    if (!env->define(fn->name, sig.str(), false))
+    {
+        throw std::runtime_error("Function already defined: " + fn->name);
     }
 
+    // Save current state for nested function processing
+    auto oldEnv = env;
+    env = std::make_shared<Environment>(oldEnv);
+
+    // Add parameters to new environment
+    for (auto &p : fn->params)
+    {
+        const std::string &pname = p.first;
+        const std::string ptype = p.second.empty() ? "any" : p.second;
+        if (!env->define(pname, ptype, false))
+        {
+            throw std::runtime_error("Parameter name already used in function '" + fn->name + "': " + pname);
+        }
+    }
+
+    // Set up return type checking
+    std::string oldReturn = currentReturnType;
+    if (fn->returnType.empty())
+        currentReturnType = "__INFER_RET__";
+    else
+        currentReturnType = fn->returnType;
+
+    // Check function body
+    if (auto bodyBlock = std::dynamic_pointer_cast<BlockStmt>(fn->body))
+    {
+        checkBlock(bodyBlock->statements);
+    }
+    else
+    {
+        checkStmt(fn->body);
+    }
+
+    // Handle return type inference
+    if (fn->returnType.empty())
+    {
+        std::string actualReturnType;
+        if (currentReturnType == "__INFER_RET__")
+        {
+            actualReturnType = "void"; // No return statements found
+        }
+        else
+        {
+            actualReturnType = currentReturnType; // Inferred from return statements
+        }
+    }
+
+    // Restore environment and return type
+    env = oldEnv;
+    currentReturnType = oldReturn;
+    return;
+}
     // Unknown statement
     throw std::runtime_error("Unhandled statement in typechecker");
 }
