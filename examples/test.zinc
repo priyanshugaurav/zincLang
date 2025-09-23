@@ -1,4 +1,8 @@
 fn main() {
-    var a = null
-    print(a == null)
+    var x = 10;
+    {
+        var y = 20
+        print(y) //should be 20
+    }
+    print(x) //should be 10
 }

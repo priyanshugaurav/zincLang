@@ -252,11 +252,23 @@ if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
         nullable = true;
         baseType.pop_back(); // remove '?'
     }
+
+    // FIXED: let (immutable) variables cannot be nullable - they must be initialized with concrete values
+    if (!v->isMutable && nullable)
+    {
+        throw std::runtime_error("Immutable variable (let) cannot be nullable: " + v->name);
+    }
     
     // Non-nullable explicitly typed vars must be initialized
     if (!baseType.empty() && !nullable && !v->initializer)
     {
         throw std::runtime_error("Variable '" + v->name + "' of non-nullable type '" + baseType + "' must be initialized at declaration");
+    }
+
+    // FIXED: let variables must be initialized (no uninitialized let constants)
+    if (!v->isMutable && !v->initializer)
+    {
+        throw std::runtime_error("Immutable variable (let) '" + v->name + "' must be initialized at declaration");
     }
 
     // Infer type for untyped vars
@@ -268,16 +280,26 @@ if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
         {
             baseType = inferExpr(v->initializer);
             // FIXED: For dynamic vars, if initialized with null, allow it and set type appropriately
+            // But NOT for let constants
             if (baseType == "null")
             {
+                if (!v->isMutable) // let constant cannot be null
+                {
+                    throw std::runtime_error("Immutable variable (let) '" + v->name + "' cannot be initialized with null");
+                }
                 baseType = "any"; // Dynamic variables can hold null
                 nullable = true;  // Mark as nullable since it contains null
             }
         }
         else
         {
-            baseType = "any"; // placeholder type until assigned
-            nullable = true;  // Uninitialized dynamic vars can be null
+            // Only mutable vars can be uninitialized
+            if (v->isMutable)
+            {
+                baseType = "any"; // placeholder type until assigned
+                nullable = true;  // Uninitialized dynamic vars can be null
+            }
+            // let constants must be initialized (handled above)
         }
     }
 
@@ -288,7 +310,12 @@ if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
 
         if (initType == "null")
         {
-            // FIXED: Allow null for dynamic variables
+            // FIXED: let constants cannot be null
+            if (!v->isMutable)
+            {
+                throw std::runtime_error("Immutable variable (let) '" + v->name + "' cannot be initialized with null");
+            }
+            // FIXED: Allow null for dynamic variables (var only)
             if (!nullable && !isDynamic)
             {
                 throw std::runtime_error("Cannot assign null to non-nullable variable '" + v->name + "'");
@@ -316,8 +343,9 @@ if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
     }
 
     return;
-}
-    // ExprStmt
+}   
+
+// ExprStmt
     if (auto e = std::dynamic_pointer_cast<ExprStmt>(stmt))
     {
         // expression must be well-typed
@@ -627,11 +655,21 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
             if (!symOpt->isMutable)
                 throw std::runtime_error("Cannot assign to immutable variable (let): " + lhsId->name);
 
-            // Null check
+            // Null check - FIXED to handle let constants properly
             if (rhsType == "null")
             {
-                if (!symOpt->isNullable)
+                // let constants cannot be assigned null (but they're immutable anyway)
+                // Allow null for dynamic mutable variables or explicitly nullable mutable variables
+                if (!symOpt->isNullable && !symOpt->isDynamic)
                     throw std::runtime_error("Cannot assign null to non-nullable variable '" + lhsId->name + "'");
+                
+                // For dynamic vars, update to allow null storage
+                if (symOpt->isDynamic)
+                {
+                    symOpt->isNullable = true; // Mark as nullable since it now contains null
+                    symOpt->type = "any"; // Keep as any type for flexibility
+                }
+                
                 return symOpt->type; // keep declared type
             }
 
@@ -690,6 +728,22 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
 
             // Handle "any" type - allow comparison of any types
             if (L == "any" || R == "any")
+                return "bool";
+
+            // FIXED: Allow null comparisons with any type
+            if (L == "null" || R == "null")
+                return "bool";
+
+            // Handle nullable types - strip ? for comparison
+            auto stripNullable = [](const std::string& type) {
+                return (!type.empty() && type.back() == '?') ? type.substr(0, type.size() - 1) : type;
+            };
+            
+            std::string baseL = stripNullable(L);
+            std::string baseR = stripNullable(R);
+
+            // Allow comparison between nullable and non-nullable versions of same type
+            if (baseL == baseR)
                 return "bool";
 
             if (L != R && !(isNumericType(L) && isNumericType(R)))

@@ -6,7 +6,7 @@
 #include <stdexcept>
 #include <string>
 #include <algorithm>
-#include <cstdint> 
+#include <cstdint>
 
 namespace nasm
 {
@@ -23,9 +23,21 @@ namespace nasm
 
         static constexpr int64_t NULL_VALUE = 0x8000000000000000LL; // Use sign bit as null marker
 
+        
+
         std::string newLabel(const std::string &prefix)
         {
             return prefix + std::to_string(labelCounter++);
+        }
+
+        // Helper method to detect string comparisons
+        bool isStringComparison(const ExprPtr &lhs, const ExprPtr &rhs)
+        {
+            // Check if both operands are strings
+            std::string leftType = getExprType(lhs);
+            std::string rightType = getExprType(rhs);
+
+            return (leftType == "string" && rightType == "string");
         }
 
         // Return a memory operand like: qword [rbp-8]
@@ -42,7 +54,7 @@ namespace nasm
         std::unordered_map<std::string, std::string> exprTypes;
         std::unordered_map<std::string, std::string> functionReturnTypes;
 
-        std::unordered_map<std::string, bool> varNullable; 
+        std::unordered_map<std::string, bool> varNullable;
 
         void genStmtSkipNestedFunctions(const StmtPtr &stmt)
         {
@@ -207,7 +219,7 @@ namespace nasm
             emit("    syscall");
         }
 
-        void emitPrintValue(const std::string& varType, bool isNullable = false)
+        void emitPrintValue(const std::string &varType, bool isNullable = false)
         {
             if (isNullable)
             {
@@ -690,7 +702,7 @@ namespace nasm
                 stackOffset = savedStackOffset;
                 deferredFunctions = savedDeferred;
             }
-             if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
+            if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
             {
                 if (varTable.find(v->name) == varTable.end())
                 {
@@ -1015,7 +1027,9 @@ namespace nasm
                     emit("    mov rax, " + slot(off));
                 }
             }
-             else if (auto bin = std::dynamic_pointer_cast<BinaryExpr>(expr))
+            // REPLACE the entire binary expression handling in genExpr with this corrected version:
+
+            else if (auto bin = std::dynamic_pointer_cast<BinaryExpr>(expr))
             {
                 // Handle assignment operators
                 if (bin->op == "=" || bin->op == "+=" || bin->op == "-=" ||
@@ -1150,6 +1164,252 @@ namespace nasm
                     emit("    mov rax, 1");
                     emit(doneLbl + ":");
                 }
+                // Handle comparison operators FIRST (before arithmetic)
+                else if (bin->op == "==" || bin->op == "!=")
+                {
+                    // Check if we're dealing with float operations
+                    bool leftIsFloat = false, rightIsFloat = false;
+
+                    // Check left operand
+                    if (auto leftId = std::dynamic_pointer_cast<IdentifierExpr>(bin->lhs))
+                    {
+                        auto it = varTypes.find(leftId->name);
+                        leftIsFloat = (it != varTypes.end() && it->second == "float");
+                    }
+                    else if (auto leftLit = std::dynamic_pointer_cast<LiteralExpr>(bin->lhs))
+                    {
+                        leftIsFloat = (leftLit->type == "float");
+                    }
+
+                    // Check right operand
+                    if (auto rightId = std::dynamic_pointer_cast<IdentifierExpr>(bin->rhs))
+                    {
+                        auto it = varTypes.find(rightId->name);
+                        rightIsFloat = (it != varTypes.end() && it->second == "float");
+                    }
+                    else if (auto rightLit = std::dynamic_pointer_cast<LiteralExpr>(bin->rhs))
+                    {
+                        rightIsFloat = (rightLit->type == "float");
+                    }
+
+                    // Handle float comparisons properly
+                    if (leftIsFloat || rightIsFloat)
+                    {
+                        // Float comparison using SSE instructions
+                        genExpr(bin->lhs);
+                        if (!leftIsFloat)
+                        {
+                            emit("    cvtsi2sd xmm0, rax");
+                        }
+                        else
+                        {
+                            emit("    movq xmm0, rax");
+                        }
+                        emit("    sub rsp, 8");
+                        emit("    movsd [rsp], xmm0");
+
+                        genExpr(bin->rhs);
+                        if (!rightIsFloat)
+                        {
+                            emit("    cvtsi2sd xmm1, rax");
+                        }
+                        else
+                        {
+                            emit("    movq xmm1, rax");
+                        }
+
+                        emit("    movsd xmm0, [rsp]");
+                        emit("    add rsp, 8");
+
+                        // Compare floats
+                        emit("    comisd xmm0, xmm1");
+                        if (bin->op == "==")
+                        {
+                            emit("    sete al");
+                            emit("    movzx rax, al");
+                        }
+                        else // !=
+                        {
+                            emit("    setne al");
+                            emit("    movzx rax, al");
+                        }
+                    }
+                    // Handle string comparisons properly
+                    else if (isStringComparison(bin->lhs, bin->rhs))
+                    {
+                        // String content comparison
+                        genExpr(bin->lhs); // first string address in rax
+                        emit("    push rax");
+                        genExpr(bin->rhs);        // second string address in rax
+                        emit("    mov rsi, rax"); // second string in rsi
+                        emit("    pop rdi");      // first string in rdi
+
+                        // Call string comparison routine
+                        std::string cmpLbl = newLabel("strcmp");
+                        std::string eqLbl = cmpLbl + "_eq";
+                        std::string neLbl = cmpLbl + "_ne";
+                        std::string doneLbl = cmpLbl + "_done";
+
+                        emit(cmpLbl + "_loop:");
+                        emit("    mov al, [rdi]");
+                        emit("    mov bl, [rsi]");
+                        emit("    cmp al, bl");
+                        emit("    jne " + neLbl);
+                        emit("    test al, al"); // check for null terminator
+                        emit("    je " + eqLbl);
+                        emit("    inc rdi");
+                        emit("    inc rsi");
+                        emit("    jmp " + cmpLbl + "_loop");
+
+                        emit(eqLbl + ":");
+                        if (bin->op == "==")
+                            emit("    mov rax, 1"); // strings are equal
+                        else
+                            emit("    mov rax, 0"); // strings are equal, but we want !=
+                        emit("    jmp " + doneLbl);
+
+                        emit(neLbl + ":");
+                        if (bin->op == "==")
+                            emit("    mov rax, 0"); // strings are not equal
+                        else
+                            emit("    mov rax, 1"); // strings are not equal, and we want !=
+
+                        emit(doneLbl + ":");
+                    }
+                    else
+                    {
+                        // Regular integer comparison
+                        genExpr(bin->lhs);
+                        emit("    push rax");
+                        genExpr(bin->rhs);
+                        emit("    mov rbx, rax");
+                        emit("    pop rax");
+
+                        emit("    cmp rax, rbx");
+                        if (bin->op == "==")
+                        {
+                            emit("    sete al");
+                            emit("    movzx rax, al");
+                        }
+                        else // !=
+                        {
+                            emit("    setne al");
+                            emit("    movzx rax, al");
+                        }
+                    }
+                }
+                else if (bin->op == "<" || bin->op == "<=" || bin->op == ">" || bin->op == ">=")
+                {
+                    // Check if we're dealing with float operations
+                    bool leftIsFloat = false, rightIsFloat = false;
+
+                    // Check left operand
+                    if (auto leftId = std::dynamic_pointer_cast<IdentifierExpr>(bin->lhs))
+                    {
+                        auto it = varTypes.find(leftId->name);
+                        leftIsFloat = (it != varTypes.end() && it->second == "float");
+                    }
+                    else if (auto leftLit = std::dynamic_pointer_cast<LiteralExpr>(bin->lhs))
+                    {
+                        leftIsFloat = (leftLit->type == "float");
+                    }
+
+                    // Check right operand
+                    if (auto rightId = std::dynamic_pointer_cast<IdentifierExpr>(bin->rhs))
+                    {
+                        auto it = varTypes.find(rightId->name);
+                        rightIsFloat = (it != varTypes.end() && it->second == "float");
+                    }
+                    else if (auto rightLit = std::dynamic_pointer_cast<LiteralExpr>(bin->rhs))
+                    {
+                        rightIsFloat = (rightLit->type == "float");
+                    }
+
+                    // Handle float comparisons for relational operators
+                    if (leftIsFloat || rightIsFloat)
+                    {
+                        // Float comparison using SSE instructions
+                        genExpr(bin->lhs);
+                        if (!leftIsFloat)
+                        {
+                            emit("    cvtsi2sd xmm0, rax");
+                        }
+                        else
+                        {
+                            emit("    movq xmm0, rax");
+                        }
+                        emit("    sub rsp, 8");
+                        emit("    movsd [rsp], xmm0");
+
+                        genExpr(bin->rhs);
+                        if (!rightIsFloat)
+                        {
+                            emit("    cvtsi2sd xmm1, rax");
+                        }
+                        else
+                        {
+                            emit("    movq xmm1, rax");
+                        }
+
+                        emit("    movsd xmm0, [rsp]");
+                        emit("    add rsp, 8");
+
+                        // Compare floats
+                        emit("    comisd xmm0, xmm1");
+                        if (bin->op == "<")
+                        {
+                            emit("    setb al");
+                            emit("    movzx rax, al");
+                        }
+                        else if (bin->op == "<=")
+                        {
+                            emit("    setbe al");
+                            emit("    movzx rax, al");
+                        }
+                        else if (bin->op == ">")
+                        {
+                            emit("    seta al");
+                            emit("    movzx rax, al");
+                        }
+                        else // >=
+                        {
+                            emit("    setae al");
+                            emit("    movzx rax, al");
+                        }
+                    }
+                    else
+                    {
+                        // Regular integer comparison
+                        genExpr(bin->lhs);
+                        emit("    push rax");
+                        genExpr(bin->rhs);
+                        emit("    mov rbx, rax");
+                        emit("    pop rax");
+
+                        emit("    cmp rax, rbx");
+                        if (bin->op == "<")
+                        {
+                            emit("    setl al");
+                            emit("    movzx rax, al");
+                        }
+                        else if (bin->op == "<=")
+                        {
+                            emit("    setle al");
+                            emit("    movzx rax, al");
+                        }
+                        else if (bin->op == ">")
+                        {
+                            emit("    setg al");
+                            emit("    movzx rax, al");
+                        }
+                        else // >=
+                        {
+                            emit("    setge al");
+                            emit("    movzx rax, al");
+                        }
+                    }
+                }
+                // Handle arithmetic and other operations
                 else
                 {
                     // Check if we're dealing with float operations
@@ -1261,46 +1521,10 @@ namespace nasm
                             emit("    mov rcx, rbx");
                             emit("    sar rax, cl"); // arithmetic right shift
                         }
-                        // Comparison operators
-                        else if (bin->op == "==")
-                        {
-                            emit("    cmp rax, rbx");
-                            emit("    sete al");
-                            emit("    movzx rax, al");
-                        }
-                        else if (bin->op == "!=")
-                        {
-                            emit("    cmp rax, rbx");
-                            emit("    setne al");
-                            emit("    movzx rax, al");
-                        }
-                        else if (bin->op == "<")
-                        {
-                            emit("    cmp rax, rbx");
-                            emit("    setl al");
-                            emit("    movzx rax, al");
-                        }
-                        else if (bin->op == "<=")
-                        {
-                            emit("    cmp rax, rbx");
-                            emit("    setle al");
-                            emit("    movzx rax, al");
-                        }
-                        else if (bin->op == ">")
-                        {
-                            emit("    cmp rax, rbx");
-                            emit("    setg al");
-                            emit("    movzx rax, al");
-                        }
-                        else if (bin->op == ">=")
-                        {
-                            emit("    cmp rax, rbx");
-                            emit("    setge al");
-                            emit("    movzx rax, al");
-                        }
                     }
                 }
             }
+
             else if (auto un = std::dynamic_pointer_cast<UnaryExpr>(expr))
             {
                 genExpr(un->rhs);
