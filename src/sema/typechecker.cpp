@@ -239,69 +239,84 @@ void TypeChecker::checkStmt(const StmtPtr &stmt)
 
     // ---------------------------
     // VarDecl
-    if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
+// REPLACE the VarDecl section in checkStmt with this fixed version:
+
+if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
+{
+    bool nullable = false;
+    std::string baseType = v->typeHint;
+
+    // check for nullable type
+    if (!v->typeHint.empty() && v->typeHint.back() == '?')
     {
-        bool nullable = false;
-        std::string baseType = v->typeHint;
-
-        // check for nullable type
-        if (!v->typeHint.empty() && v->typeHint.back() == '?')
-        {
-            nullable = true;
-            baseType.pop_back(); // remove '?'
-        }
-        if (!baseType.empty() && !nullable && !v->initializer)
-        {
-            throw std::runtime_error("Variable '" + v->name + "' of non-nullable type '" + baseType + "' must be initialized at declaration");
-        }
-
-        // Infer type for untyped vars
-        bool isDynamic = false;
-        if (baseType.empty())
-        {
-            isDynamic = true; // no type hint => dynamic
-            if (v->initializer)
-            {
-                baseType = inferExpr(v->initializer);
-            }
-            else
-            {
-                baseType = "dynamic"; // placeholder type until assigned
-            }
-        }
-
-        // initializer exists, check type match for explicitly typed
-        if (v->initializer)
-        {
-            std::string initType = inferExpr(v->initializer);
-
-            if (initType == "null")
-            {
-                if (!nullable)
-                {
-                    throw std::runtime_error("Cannot assign null to non-nullable variable '" + v->name + "'");
-                }
-            }
-            else if (!isDynamic && !isArrayCompatible(baseType, initType))
-            {
-                throw std::runtime_error("Type mismatch for variable '" + v->name +
-                                         "': expected " + baseType + ", got " + initType);
-            }
-
-            // If dynamic, update type to initializer type
-            if (isDynamic)
-                baseType = initType;
-        }
-
-        // define variable in environment
-        if (!env->define(v->name, baseType, v->isMutable, -1, isDynamic, nullable))
-        {
-            throw std::runtime_error("Symbol already defined in this scope: " + v->name);
-        }
-
-        return;
+        nullable = true;
+        baseType.pop_back(); // remove '?'
+    }
+    
+    // Non-nullable explicitly typed vars must be initialized
+    if (!baseType.empty() && !nullable && !v->initializer)
+    {
+        throw std::runtime_error("Variable '" + v->name + "' of non-nullable type '" + baseType + "' must be initialized at declaration");
     }
 
+    // Infer type for untyped vars
+    bool isDynamic = false;
+    if (baseType.empty())
+    {
+        isDynamic = true; // no type hint => dynamic
+        if (v->initializer)
+        {
+            baseType = inferExpr(v->initializer);
+            // FIXED: For dynamic vars, if initialized with null, allow it and set type appropriately
+            if (baseType == "null")
+            {
+                baseType = "any"; // Dynamic variables can hold null
+                nullable = true;  // Mark as nullable since it contains null
+            }
+        }
+        else
+        {
+            baseType = "any"; // placeholder type until assigned
+            nullable = true;  // Uninitialized dynamic vars can be null
+        }
+    }
+
+    // initializer exists, check type match for explicitly typed
+    if (v->initializer)
+    {
+        std::string initType = inferExpr(v->initializer);
+
+        if (initType == "null")
+        {
+            // FIXED: Allow null for dynamic variables
+            if (!nullable && !isDynamic)
+            {
+                throw std::runtime_error("Cannot assign null to non-nullable variable '" + v->name + "'");
+            }
+            // For dynamic vars or nullable vars, null is allowed
+        }
+        else if (!isDynamic && !isArrayCompatible(baseType, initType))
+        {
+            // Only check type compatibility for non-dynamic variables
+            throw std::runtime_error("Type mismatch for variable '" + v->name +
+                                     "': expected " + baseType + ", got " + initType);
+        }
+
+        // If dynamic, update type to initializer type (but keep it as "any" if null)
+        if (isDynamic && initType != "null")
+        {
+            baseType = initType;
+        }
+    }
+
+    // define variable in environment
+    if (!env->define(v->name, baseType, v->isMutable, -1, isDynamic, nullable))
+    {
+        throw std::runtime_error("Symbol already defined in this scope: " + v->name);
+    }
+
+    return;
+}
     // ExprStmt
     if (auto e = std::dynamic_pointer_cast<ExprStmt>(stmt))
     {

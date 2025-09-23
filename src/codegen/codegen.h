@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string>
 #include <algorithm>
+#include <cstdint> 
 
 namespace nasm
 {
@@ -19,6 +20,8 @@ namespace nasm
         std::vector<std::shared_ptr<FuncDecl>> deferredFunctions;
         std::vector<std::unordered_map<std::string, std::string>> scopeStack; // for nested variable scopes
         int scopeLevel = 0;
+
+        static constexpr int64_t NULL_VALUE = 0x8000000000000000LL; // Use sign bit as null marker
 
         std::string newLabel(const std::string &prefix)
         {
@@ -38,6 +41,8 @@ namespace nasm
 
         std::unordered_map<std::string, std::string> exprTypes;
         std::unordered_map<std::string, std::string> functionReturnTypes;
+
+        std::unordered_map<std::string, bool> varNullable; 
 
         void genStmtSkipNestedFunctions(const StmtPtr &stmt)
         {
@@ -82,6 +87,11 @@ namespace nasm
             return out;
         }
 
+        bool isNullValue(int64_t value) const
+        {
+            return value == NULL_VALUE;
+        }
+
     public:
         Codegen(const std::string &filename)
         {
@@ -89,13 +99,13 @@ namespace nasm
             if (!out)
                 throw std::runtime_error("Could not open output file");
 
-            dataSection.push_back("dot_char: db '.', 0"); // keep dot_char here
-            // dataSection.push_back("num_buf: resb 32"); // REMOVE THIS LINE
+            dataSection.push_back("dot_char: db '.', 0");
             dataSection.push_back("minus_char: db '-', 0");
             dataSection.push_back("half_const: dq 0.5");
             dataSection.push_back("true_str: db 'true', 0");
             dataSection.push_back("false_str: db 'false', 0");
-            // minus_char: db '-', 0
+            // CHANGE 4: Add null string representation
+            dataSection.push_back("null_str: db 'null', 0");
         }
 
         void emit(const std::string &s) { out << s << "\n"; }
@@ -117,20 +127,21 @@ namespace nasm
                 std::string thenType = getExprType(ifExpr->thenBranch);
                 std::string elseType = getExprType(ifExpr->elseBranch);
 
-                // If both branches have the same type, return that type
                 if (thenType == elseType)
                     return thenType;
 
-                // If one is float and the other is int, promote to float
+                // If one branch is null, return nullable version of the other
+                if (thenType == "null")
+                    return elseType + "?";
+                if (elseType == "null")
+                    return thenType + "?";
+
                 if ((thenType == "float" && elseType == "int") ||
                     (thenType == "int" && elseType == "float"))
                     return "float";
 
-                // For other mixed types, default to the then branch type
-                // You might want different logic here depending on your language semantics
                 return thenType;
             }
-            // ADD this case for function calls:
             else if (auto call = std::dynamic_pointer_cast<CallExpr>(expr))
             {
                 if (auto callee = std::dynamic_pointer_cast<IdentifierExpr>(call->callee))
@@ -141,11 +152,10 @@ namespace nasm
                         return it->second;
                     }
                 }
-                return "int"; // default fallback
+                return "int";
             }
             else if (auto bin = std::dynamic_pointer_cast<BinaryExpr>(expr))
             {
-                // Assignment operators return the type of RHS
                 if (bin->op == "=" || bin->op == "+=" || bin->op == "-=" ||
                     bin->op == "*=" || bin->op == "/=" || bin->op == "%=" ||
                     bin->op == "&=" || bin->op == "|=" || bin->op == "^=" ||
@@ -153,14 +163,12 @@ namespace nasm
                 {
                     return getExprType(bin->rhs);
                 }
-                // Comparison and logical operators return bool
                 else if (bin->op == "==" || bin->op == "!=" || bin->op == "<" ||
                          bin->op == "<=" || bin->op == ">" || bin->op == ">=" ||
                          bin->op == "&&" || bin->op == "||")
                 {
                     return "bool";
                 }
-                // Bitwise and modulo operators preserve integer type
                 else if (bin->op == "&" || bin->op == "|" || bin->op == "^" ||
                          bin->op == "<<" || bin->op == ">>" || bin->op == "%")
                 {
@@ -171,7 +179,6 @@ namespace nasm
                     std::string leftType = getExprType(bin->lhs);
                     std::string rightType = getExprType(bin->rhs);
 
-                    // If either operand is float, result is float
                     if (leftType == "float" || rightType == "float")
                         return "float";
                     else
@@ -182,14 +189,75 @@ namespace nasm
             {
                 if (un->op == "!")
                     return "bool";
-                else if (un->op == "~") // Add bitwise NOT
+                else if (un->op == "~")
                     return "int";
                 else
                     return getExprType(un->rhs);
             }
 
-            return "int"; // default
+            return "int";
         }
+
+        void emitPrintNull()
+        {
+            emit("    mov rax, 1");
+            emit("    mov rdi, 1");
+            emit("    lea rsi, [rel null_str]");
+            emit("    mov rdx, 4");
+            emit("    syscall");
+        }
+
+        void emitPrintValue(const std::string& varType, bool isNullable = false)
+        {
+            if (isNullable)
+            {
+                std::string notNullLbl = newLabel("not_null");
+                std::string doneLbl = newLabel("print_done");
+
+                emit("    mov rbx, " + std::to_string(NULL_VALUE));
+                emit("    cmp rax, rbx");
+                emit("    jne " + notNullLbl);
+
+                // Print null
+                emitPrintNull();
+                emit("    jmp " + doneLbl);
+
+                emit(notNullLbl + ":");
+                // Print the actual value
+                if (varType == "float")
+                {
+                    emit("    movq xmm0, rax");
+                    emitPrintDouble();
+                }
+                else if (varType == "bool")
+                {
+                    emitPrintBool();
+                }
+                else
+                {
+                    emitPrintRax();
+                }
+
+                emit(doneLbl + ":");
+            }
+            else
+            {
+                if (varType == "float")
+                {
+                    emit("    movq xmm0, rax");
+                    emitPrintDouble();
+                }
+                else if (varType == "bool")
+                {
+                    emitPrintBool();
+                }
+                else
+                {
+                    emitPrintRax();
+                }
+            }
+        }
+
         void emitPrintBool()
         {
             std::string lbl = newLabel("bool");
@@ -423,6 +491,10 @@ namespace nasm
                     varTable[v->name] = stackOffset;
                 }
 
+                // CHANGE: Determine if variable is nullable
+                bool isNullable = v->typeHint.empty() || v->typeHint.back() == '?';
+                varNullable[v->name] = isNullable;
+
                 if (v->initializer)
                 {
                     std::string inferredType = getExprType(v->initializer);
@@ -452,8 +524,18 @@ namespace nasm
                 else
                 {
                     int off = varTable[v->name];
-                    emit("    mov rax, 0");
-                    emit("    mov " + slot(off) + ", rax");
+                    if (isNullable)
+                    {
+                        // Initialize nullable variables to null
+                        emit("    mov rax, " + std::to_string(NULL_VALUE));
+                        emit("    mov " + slot(off) + ", rax");
+                    }
+                    else
+                    {
+                        // Initialize non-nullable variables to zero
+                        emit("    mov rax, 0");
+                        emit("    mov " + slot(off) + ", rax");
+                    }
                 }
             }
 
@@ -608,18 +690,20 @@ namespace nasm
                 stackOffset = savedStackOffset;
                 deferredFunctions = savedDeferred;
             }
-            if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
+             if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
             {
-                // If var wasn't preallocated, allocate now
                 if (varTable.find(v->name) == varTable.end())
                 {
                     stackOffset -= 8;
                     varTable[v->name] = stackOffset;
                 }
 
+                // Determine if variable is nullable
+                bool isNullable = v->typeHint.empty() || v->typeHint.back() == '?';
+                varNullable[v->name] = isNullable;
+
                 if (v->initializer)
                 {
-                    // Store variable type - handle different initializer types
                     if (auto litInit = std::dynamic_pointer_cast<LiteralExpr>(v->initializer))
                     {
                         if (litInit->type == "string")
@@ -628,16 +712,16 @@ namespace nasm
                             varTypes[v->name] = "int";
                         else if (litInit->type == "float")
                             varTypes[v->name] = "float";
+                        else if (litInit->type == "null")
+                            varTypes[v->name] = "null";
                     }
                     else if (auto callInit = std::dynamic_pointer_cast<CallExpr>(v->initializer))
                     {
-                        // Handle function call initializers
                         std::string returnType = getExprType(callInit);
                         varTypes[v->name] = returnType;
                     }
                     else
                     {
-                        // For other expression types, try to infer the type
                         std::string inferredType = getExprType(v->initializer);
                         varTypes[v->name] = inferredType;
                     }
@@ -645,7 +729,6 @@ namespace nasm
                     genExpr(v->initializer);
                     int off = varTable[v->name];
 
-                    // Handle different storage types
                     auto it = varTypes.find(v->name);
                     if (it != varTypes.end())
                     {
@@ -656,7 +739,6 @@ namespace nasm
                         }
                         else
                         {
-                            // For strings and integers, store the value/pointer in rax
                             emit("    mov " + slot(off) + ", rax");
                         }
                     }
@@ -668,8 +750,18 @@ namespace nasm
                 else
                 {
                     int off = varTable[v->name];
-                    emit("    mov rax, 0");
-                    emit("    mov " + slot(off) + ", rax");
+                    if (isNullable)
+                    {
+                        // Initialize to null
+                        emit("    mov rax, " + std::to_string(NULL_VALUE));
+                        emit("    mov " + slot(off) + ", rax");
+                    }
+                    else
+                    {
+                        // Initialize to zero
+                        emit("    mov rax, 0");
+                        emit("    mov " + slot(off) + ", rax");
+                    }
                 }
             }
 
@@ -687,7 +779,6 @@ namespace nasm
 
                             auto arg = call->args[0];
 
-                            // Check what type we're printing
                             if (auto lit = std::dynamic_pointer_cast<LiteralExpr>(arg))
                             {
                                 if (lit->type == "string")
@@ -701,6 +792,11 @@ namespace nasm
                                     emit("    lea rsi, [rel " + lbl + "]");
                                     emit("    mov rdx, " + std::to_string(lit->value.size()));
                                     emit("    syscall");
+                                    return;
+                                }
+                                else if (lit->type == "null")
+                                {
+                                    emitPrintNull();
                                     return;
                                 }
                             }
@@ -727,38 +823,29 @@ namespace nasm
                                 }
                             }
 
-                            // Determine the type of the expression being printed
                             std::string argType = getExprType(arg);
-
-                            // Generate the argument
                             genExpr(arg);
 
-                            // Print based on the determined type
-                            if (argType == "float")
+                            // Check if the argument is from a nullable variable
+                            bool isNullable = false;
+                            if (auto idArg = std::dynamic_pointer_cast<IdentifierExpr>(arg))
                             {
-                                emit("    movq xmm0, rax");
-                                emitPrintDouble();
+                                auto nullIt = varNullable.find(idArg->name);
+                                if (nullIt != varNullable.end())
+                                    isNullable = nullIt->second;
                             }
-                            else if (argType == "bool")
-                            {
-                                emitPrintBool();
-                            }
-                            else
-                            {
-                                emitPrintRax();
-                            }
+
+                            emitPrintValue(argType, isNullable);
                             return;
                         }
                         else
                         {
-                            // Handle other function calls
-                            genExpr(e->expr); // This will generate the call
+                            genExpr(e->expr);
                             return;
                         }
                     }
                 }
 
-                // Normal expression statement
                 genExpr(e->expr);
             }
             else if (auto r = std::dynamic_pointer_cast<ReturnStmt>(stmt))
@@ -814,44 +901,43 @@ namespace nasm
                 emit(endLbl + ":");
             }
 
-              else if (auto t = std::dynamic_pointer_cast<TimesStmt>(stmt))
-{
-    std::string startLbl = newLabel("Ltimes_start");
-    std::string endLbl   = newLabel("Ltimes_end");
+            else if (auto t = std::dynamic_pointer_cast<TimesStmt>(stmt))
+            {
+                std::string startLbl = newLabel("Ltimes_start");
+                std::string endLbl = newLabel("Ltimes_end");
 
-    // Determine count type and generate expression.
-    // If float, convert to int (truncate toward zero).
-    std::string countType = getExprType(t->count);
-    if (countType == "float")
-    {
-        genExpr(t->count);                 // expects result in xmm0
-        emit("    cvttsd2si rax, xmm0");   // rax <- (int) xmm0
-    }
-    else
-    {
-        genExpr(t->count);                 // expects result in rax for ints
-    }
+                // Determine count type and generate expression.
+                // If float, convert to int (truncate toward zero).
+                std::string countType = getExprType(t->count);
+                if (countType == "float")
+                {
+                    genExpr(t->count);               // expects result in xmm0
+                    emit("    cvttsd2si rax, xmm0"); // rax <- (int) xmm0
+                }
+                else
+                {
+                    genExpr(t->count); // expects result in rax for ints
+                }
 
-    // Allocate 16 bytes on the stack for the loop counter (keeps 16-byte alignment)
-    emit("    sub rsp, 16");
-    emit("    mov qword [rsp], rax");     // store counter at [rsp]
+                // Allocate 16 bytes on the stack for the loop counter (keeps 16-byte alignment)
+                emit("    sub rsp, 16");
+                emit("    mov qword [rsp], rax"); // store counter at [rsp]
 
-    emit(startLbl + ":");
-    emit("    mov rax, qword [rsp]");
-    emit("    cmp rax, 0");
-    emit("    jle " + endLbl);            // exit if <= 0
+                emit(startLbl + ":");
+                emit("    mov rax, qword [rsp]");
+                emit("    cmp rax, 0");
+                emit("    jle " + endLbl); // exit if <= 0
 
-    // Loop body
-    genStmt(t->body);
+                // Loop body
+                genStmt(t->body);
 
-    // decrement counter and loop
-    emit("    dec qword [rsp]");
-    emit("    jmp " + startLbl);
+                // decrement counter and loop
+                emit("    dec qword [rsp]");
+                emit("    jmp " + startLbl);
 
-    emit(endLbl + ":");
-    emit("    add rsp, 16");              // restore stack
-}
-
+                emit(endLbl + ":");
+                emit("    add rsp, 16"); // restore stack
+            }
 
             else if (auto p = std::dynamic_pointer_cast<PrintStmt>(stmt))
             {
@@ -894,6 +980,8 @@ namespace nasm
                     emit("    mov rax, " + lit->value);
                 else if (lit->type == "bool")
                     emit("    mov rax, " + std::string(lit->value == "true" ? "1" : "0"));
+                else if (lit->type == "null")
+                    emit("    mov rax, " + std::to_string(NULL_VALUE));
                 else if (lit->type == "string")
                 {
                     std::string lbl = "str_" + std::to_string(labelCounter++);
@@ -905,9 +993,8 @@ namespace nasm
                 {
                     std::string lbl = "flt_" + std::to_string(labelCounter++);
                     dataSection.push_back(lbl + ": dq " + lit->value);
-                    // FIXED: Don't call emitPrintDouble here - just load the value
                     emit("    movsd xmm0, [rel " + lbl + "]");
-                    emit("    movq rax, xmm0"); // Store bit pattern in rax for consistency
+                    emit("    movq rax, xmm0");
                 }
             }
             else if (auto id = std::dynamic_pointer_cast<IdentifierExpr>(expr))
@@ -928,7 +1015,7 @@ namespace nasm
                     emit("    mov rax, " + slot(off));
                 }
             }
-            else if (auto bin = std::dynamic_pointer_cast<BinaryExpr>(expr))
+             else if (auto bin = std::dynamic_pointer_cast<BinaryExpr>(expr))
             {
                 // Handle assignment operators
                 if (bin->op == "=" || bin->op == "+=" || bin->op == "-=" ||
@@ -944,13 +1031,32 @@ namespace nasm
 
                     if (bin->op == "=")
                     {
-                        genExpr(bin->rhs);
-                        // Check if target is float
-                        auto it = varTypes.find(id->name);
-                        if (it != varTypes.end() && it->second == "float")
+                        // Check if assigning null to non-nullable variable
+                        if (auto rhsLit = std::dynamic_pointer_cast<LiteralExpr>(bin->rhs))
                         {
-                            emit("    movq xmm0, rax");
-                            emit("    movsd " + slot(off) + ", xmm0");
+                            if (rhsLit->type == "null")
+                            {
+                                auto nullIt = varNullable.find(id->name);
+                                if (nullIt != varNullable.end() && !nullIt->second)
+                                {
+                                    throw std::runtime_error("Cannot assign null to non-nullable variable: " + id->name);
+                                }
+                            }
+                        }
+
+                        genExpr(bin->rhs);
+                        auto it = varTypes.find(id->name);
+                        if (it != varTypes.end())
+                        {
+                            if (it->second == "float")
+                            {
+                                emit("    movq xmm0, rax");
+                                emit("    movsd " + slot(off) + ", xmm0");
+                            }
+                            else
+                            {
+                                emit("    mov " + slot(off) + ", rax");
+                            }
                         }
                         else
                         {

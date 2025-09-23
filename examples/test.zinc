@@ -1,8 +1,4 @@
 fn main() {
-    var i = 0
-    while(i<2){
-        print(2.25+2.75)
-        print(" ")
-        i = i+1
-    }
+    var a = null
+    print(a == null)
 }
