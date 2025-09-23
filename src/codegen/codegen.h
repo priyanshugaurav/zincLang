@@ -28,6 +28,7 @@ namespace nasm
         std::unordered_map<std::string, std::vector<int>> arrayBounds;          // Static array bounds
 
         std::unordered_map<std::string, std::vector<std::string>> arrayElementTypes;
+        bool errorHandlersEmitted = false;
 
         void storeArrayElement(const std::string &arrayVar, int index, const std::string &elemType)
         {
@@ -131,6 +132,33 @@ namespace nasm
             return value == NULL_VALUE;
         }
 
+        void emitErrorHandlers()
+        {
+            if (errorHandlersEmitted)
+                return;
+            errorHandlersEmitted = true;
+
+            emit("array_bounds_error:");
+            emit("    mov rax, 1");
+            emit("    mov rdi, 2"); // stderr
+            emit("    lea rsi, [rel array_bounds_msg]");
+            emit("    mov rdx, 26");
+            emit("    syscall");
+            emit("    mov rdi, 1");  // exit code 1
+            emit("    mov rax, 60"); // sys_exit
+            emit("    syscall");
+
+            emit("null_deref_error:");
+            emit("    mov rax, 1");
+            emit("    mov rdi, 2");
+            emit("    lea rsi, [rel null_deref_msg]");
+            emit("    mov rdx, 23");
+            emit("    syscall");
+            emit("    mov rdi, 1");
+            emit("    mov rax, 60");
+            emit("    syscall");
+        }
+
         void emitArrayBoundsCheck(const std::string &arrayReg, const std::string &indexReg)
         {
             std::string okLabel = newLabel("bounds_ok");
@@ -143,16 +171,6 @@ namespace nasm
             emit("    cmp " + indexReg + ", qword [" + arrayReg + "]");
             emit("    jge array_bounds_error");
             emit("    jmp " + okLabel);
-
-            emit("array_bounds_error:");
-            emit("    mov rax, 1");
-            emit("    mov rdi, 2"); // stderr
-            emit("    lea rsi, [rel array_bounds_msg]");
-            emit("    mov rdx, 26");
-            emit("    syscall");
-            emit("    mov rdi, 1");  // exit code 1
-            emit("    mov rax, 60"); // sys_exit
-            emit("    syscall");
 
             emit(okLabel + ":");
         }
@@ -185,14 +203,7 @@ namespace nasm
             emit("    jne " + okLabel);
 
             // Null dereference error
-            emit("    mov rax, 1");
-            emit("    mov rdi, 2");
-            emit("    lea rsi, [rel null_deref_msg]");
-            emit("    mov rdx, 23");
-            emit("    syscall");
-            emit("    mov rdi, 1");
-            emit("    mov rax, 60");
-            emit("    syscall");
+            emit("    jmp null_deref_error");
 
             emit(okLabel + ":");
         }
@@ -219,131 +230,6 @@ namespace nasm
             dataSection.push_back("null_deref_msg: db 'Null pointer dereference', 10, 0");
         }
 
-        void handleArrayExpr(const std::shared_ptr<ArrayExpr> &arr)
-        {
-            int size = arr->elements.size();
-
-            if (size == 0)
-            {
-                // Empty array
-                emit("    mov rax, " + std::to_string(NULL_VALUE));
-                return;
-            }
-
-            // Allocate array with type information
-            // Array layout: [length][type_info_ptr][element1][element2]...
-            int totalBytes = 8 + 8 + (size * 8); // length + type_ptr + elements
-
-            emit("    mov rax, 9");                             // sys_mmap
-            emit("    mov rdi, 0");                             // addr
-            emit("    mov rsi, " + std::to_string(totalBytes)); // length
-            emit("    mov rdx, 3");                             // PROT_READ | PROT_WRITE
-            emit("    mov r10, 34");                            // MAP_PRIVATE | MAP_ANONYMOUS
-            emit("    mov r8, -1");                             // fd
-            emit("    mov r9, 0");                              // offset
-            emit("    syscall");
-
-            // Store array length at offset 0
-            emit("    mov qword [rax], " + std::to_string(size));
-            emit("    push rax"); // Save array pointer
-
-            // Allocate type information array
-            int typeBytes = size * 8; // 8 bytes per type (we'll store type as integer)
-            emit("    mov rax, 9");   // sys_mmap for types
-            emit("    mov rdi, 0");
-            emit("    mov rsi, " + std::to_string(typeBytes));
-            emit("    mov rdx, 3");
-            emit("    mov r10, 34");
-            emit("    mov r8, -1");
-            emit("    mov r9, 0");
-            emit("    syscall");
-
-            emit("    mov rbx, [rsp]");           // Load array pointer
-            emit("    mov qword [rbx + 8], rax"); // Store type array pointer
-
-            emit("    push rax"); // Save type array pointer
-
-            // Fill array elements and type information
-            for (int i = 0; i < size; ++i)
-            {
-                std::string elemType = getExprType(arr->elements[i]);
-
-                // Store type information (encode as integer)
-                emit("    mov rbx, [rsp]"); // type array pointer
-                int typeCode = 0;           // int
-                if (elemType == "float")
-                    typeCode = 1;
-                else if (elemType == "string")
-                    typeCode = 2;
-                else if (elemType == "bool")
-                    typeCode = 3;
-
-                emit("    mov qword [rbx + " + std::to_string(i * 8) + "], " + std::to_string(typeCode));
-
-                // Generate and store element
-                genExpr(arr->elements[i]);
-
-                if (elemType == "float")
-                {
-                    // For floats, rax already contains the bit pattern
-                    emit("    mov rbx, [rsp + 8]"); // array pointer
-                    emit("    mov qword [rbx + " + std::to_string(16 + i * 8) + "], rax");
-                }
-                else if (elemType == "string")
-                {
-                    // For strings, rax contains pointer to string
-                    emit("    mov rbx, [rsp + 8]"); // array pointer
-                    emit("    mov qword [rbx + " + std::to_string(16 + i * 8) + "], rax");
-                }
-                else
-                {
-                    // For integers, bools, etc.
-                    emit("    mov rbx, [rsp + 8]"); // array pointer
-                    emit("    mov qword [rbx + " + std::to_string(16 + i * 8) + "], rax");
-                }
-            }
-
-            emit("    add rsp, 8"); // Remove type array pointer
-            emit("    pop rax");    // Array pointer in rax
-        }
-
-        // Replace your existing IndexExpr handling in genExpr with this:
-        void handleIndexExpr(const std::shared_ptr<IndexExpr> &idx)
-        {
-            genExpr(idx->array); // Array pointer in rax
-
-            // Check for null array
-            emitNullCheck("rax");
-
-            emit("    push rax");     // Save array pointer
-            genExpr(idx->index);      // Index in rax
-            emit("    mov rbx, rax"); // Index in rbx
-            emit("    pop rax");      // Array pointer back in rax
-
-            // Bounds check
-            emitArrayBoundsCheck("rax", "rbx");
-
-            // Get type information
-            emit("    push rax");                 // Save array pointer
-            emit("    push rbx");                 // Save index
-            emit("    mov rcx, qword [rax + 8]"); // Load type array pointer
-            emit("    imul rbx, 8");              // Index * 8 for type lookup
-            emit("    add rcx, rbx");
-            emit("    mov rdx, qword [rcx]"); // Load type code
-            emit("    pop rbx");              // Restore index
-            emit("    pop rax");              // Restore array pointer
-
-            // Calculate element offset: 16 + (index * 8)
-            emit("    imul rbx, 8");
-            emit("    add rbx, 16"); // Skip length and type pointer
-            emit("    add rax, rbx");
-            emit("    mov rax, qword [rax]"); // Load element value
-
-            // Store type information for later use in printing
-            emit("    push rdx"); // Push type code onto stack for caller to use
-        }
-
-        // Update your print handling in ExprStmt to handle array elements:
         void handleArrayElementPrint(ExprPtr arg)
         {
             if (auto idx = std::dynamic_pointer_cast<IndexExpr>(arg))
@@ -380,6 +266,8 @@ namespace nasm
                 std::string stringLbl = newLabel("print_string");
                 std::string boolLbl = newLabel("print_bool");
                 std::string intLbl = newLabel("print_int");
+                std::string arrayLbl = newLabel("print_array"); // Add this
+                std::string nullLbl = newLabel("print_null");   // Add this
                 std::string doneLbl = newLabel("print_done");
 
                 emit("    cmp rdx, 0");
@@ -390,14 +278,32 @@ namespace nasm
                 emit("    je " + stringLbl);
                 emit("    cmp rdx, 3");
                 emit("    je " + boolLbl);
-                emit("    jmp " + intLbl); // default
+                emit("    cmp rdx, 4");
+                emit("    je " + arrayLbl); // Handle nested arrays
+                emit("    jmp " + intLbl);  // default
+
+                emit(intLbl + ":");
+                // Check for null first
+                emit("    mov rbx, " + std::to_string(NULL_VALUE));
+                emit("    cmp rax, rbx");
+                emit("    je " + nullLbl);
+                emitPrintRax();
+                emit("    jmp " + doneLbl);
 
                 emit(floatLbl + ":");
+                // Check for null first
+                emit("    mov rbx, " + std::to_string(NULL_VALUE));
+                emit("    cmp rax, rbx");
+                emit("    je " + nullLbl);
                 emit("    movq xmm0, rax");
                 emitPrintDouble();
                 emit("    jmp " + doneLbl);
 
                 emit(stringLbl + ":");
+                // Check for null first
+                emit("    mov rbx, " + std::to_string(NULL_VALUE));
+                emit("    cmp rax, rbx");
+                emit("    je " + nullLbl);
                 emit("    mov rsi, rax"); // string pointer
                 std::string lenLbl = newLabel("strlen");
                 emit("    xor rcx, rcx");
@@ -414,11 +320,26 @@ namespace nasm
                 emit("    jmp " + doneLbl);
 
                 emit(boolLbl + ":");
+                // Check for null first
+                emit("    mov rbx, " + std::to_string(NULL_VALUE));
+                emit("    cmp rax, rbx");
+                emit("    je " + nullLbl);
                 emitPrintBool();
                 emit("    jmp " + doneLbl);
 
-                emit(intLbl + ":");
-                emitPrintRax();
+                // Add handler for nested arrays
+                emit(arrayLbl + ":");
+                // Check for null first
+                emit("    mov rbx, " + std::to_string(NULL_VALUE));
+                emit("    cmp rax, rbx");
+                emit("    je " + nullLbl);
+                // Print nested array recursively
+                printNestedArray("rax", 0);
+                emit("    jmp " + doneLbl);
+
+                // Add handler for null values
+                emit(nullLbl + ":");
+                emitPrintNull();
 
                 emit(doneLbl + ":");
                 return;
@@ -428,6 +349,42 @@ namespace nasm
             std::string argType = getExprType(arg);
             genExpr(arg);
             emitPrintValue(argType);
+        }
+
+        // Replace your existing IndexExpr handling in genExpr with this:
+        void handleIndexExpr(const std::shared_ptr<IndexExpr> &idx)
+        {
+            genExpr(idx->array); // Array pointer in rax
+
+            // Check for null array
+            emitNullCheck("rax");
+
+            emit("    push rax");     // Save array pointer
+            genExpr(idx->index);      // Index in rax
+            emit("    mov rbx, rax"); // Index in rbx
+            emit("    pop rax");      // Array pointer back in rax
+
+            // Bounds check
+            emitArrayBoundsCheck("rax", "rbx");
+
+            // Get type information
+            emit("    push rax");                 // Save array pointer
+            emit("    push rbx");                 // Save index
+            emit("    mov rcx, qword [rax + 8]"); // Load type array pointer
+            emit("    imul rbx, 8");              // Index * 8 for type lookup
+            emit("    add rcx, rbx");
+            emit("    mov rdx, qword [rcx]"); // Load type code
+            emit("    pop rbx");              // Restore index
+            emit("    pop rax");              // Restore array pointer
+
+            // Calculate element offset: 16 + (index * 8)
+            emit("    imul rbx, 8");
+            emit("    add rbx, 16"); // Skip length and type pointer
+            emit("    add rax, rbx");
+            emit("    mov rax, qword [rax]"); // Load element value
+
+            // Store type information for later use in printing
+            emit("    push rdx"); // Push type code onto stack for caller to use
         }
 
         void emit(const std::string &s) { out << s << "\n"; }
@@ -795,6 +752,82 @@ namespace nasm
             emit("    pop rbx");
         }
 
+        void handleArrayExpr(const std::shared_ptr<ArrayExpr> &arr)
+        {
+            int size = arr->elements.size();
+
+            if (size == 0)
+            {
+                // Empty array
+                emit("    mov rax, " + std::to_string(NULL_VALUE));
+                return;
+            }
+
+            // Allocate array with type information
+            // Array layout: [length][type_info_ptr][element1][element2]...
+            int totalBytes = 8 + 8 + (size * 8); // length + type_ptr + elements
+
+            emit("    mov rax, 9");                             // sys_mmap
+            emit("    mov rdi, 0");                             // addr
+            emit("    mov rsi, " + std::to_string(totalBytes)); // length
+            emit("    mov rdx, 3");                             // PROT_READ | PROT_WRITE
+            emit("    mov r10, 34");                            // MAP_PRIVATE | MAP_ANONYMOUS
+            emit("    mov r8, -1");                             // fd
+            emit("    mov r9, 0");                              // offset
+            emit("    syscall");
+
+            // Store array length at offset 0
+            emit("    mov qword [rax], " + std::to_string(size));
+            emit("    push rax"); // Save array pointer
+
+            // Allocate type information array
+            int typeBytes = size * 8; // 8 bytes per type (we'll store type as integer)
+            emit("    mov rax, 9");   // sys_mmap for types
+            emit("    mov rdi, 0");
+            emit("    mov rsi, " + std::to_string(typeBytes));
+            emit("    mov rdx, 3");
+            emit("    mov r10, 34");
+            emit("    mov r8, -1");
+            emit("    mov r9, 0");
+            emit("    syscall");
+
+            emit("    mov rbx, [rsp]");           // Load array pointer
+            emit("    mov qword [rbx + 8], rax"); // Store type array pointer
+
+            emit("    push rax"); // Save type array pointer
+
+            // Fill array elements and type information
+            for (int i = 0; i < size; ++i)
+            {
+                std::string elemType = getExprType(arr->elements[i]);
+
+                // Store type information (encode as integer)
+                emit("    mov rbx, [rsp]"); // type array pointer
+                int typeCode = 0;           // int (default)
+                if (elemType == "float")
+                    typeCode = 1;
+                else if (elemType == "string")
+                    typeCode = 2;
+                else if (elemType == "bool")
+                    typeCode = 3;
+                else if (elemType.find("array") == 0)
+                    typeCode = 4; // nested array
+                // Note: null values will be stored as int type with NULL_VALUE
+
+                emit("    mov qword [rbx + " + std::to_string(i * 8) + "], " + std::to_string(typeCode));
+
+                // Generate and store element
+                genExpr(arr->elements[i]);
+
+                // For all types including nested arrays, store the value/pointer in rax
+                emit("    mov rbx, [rsp + 8]"); // array pointer
+                emit("    mov qword [rbx + " + std::to_string(16 + i * 8) + "], rax");
+            }
+
+            emit("    add rsp, 8"); // Remove type array pointer
+            emit("    pop rax");    // Array pointer in rax
+        }
+
         void printArrayVariable(const std::string &varName)
         {
             int off = varTable[varName];
@@ -878,6 +911,8 @@ namespace nasm
             std::string floatLbl = newLabel("print_float");
             std::string stringLbl = newLabel("print_string");
             std::string boolLbl = newLabel("print_bool");
+            std::string arrayLbl = newLabel("print_array"); // Add this
+            std::string nullLbl = newLabel("print_null");   // Add this
             std::string nextLbl = newLabel("next_elem");
 
             emit("    cmp rdx, 0");
@@ -888,13 +923,21 @@ namespace nasm
             emit("    je " + stringLbl);
             emit("    cmp rdx, 3");
             emit("    je " + boolLbl);
-            emit("    jmp " + intLbl); // Default to int
+            emit("    cmp rdx, 4");
+            emit("    je " + arrayLbl); // Handle nested arrays
+            emit("    jmp " + intLbl);  // Default to int
 
             emit(intLbl + ":");
             emit("    push rax");
             emit("    push rbx");
             emit("    push rcx");
             emit("    push r8");
+
+            // Check if it's a null value
+            emit("    mov rbx, " + std::to_string(NULL_VALUE));
+            emit("    cmp r9, rbx");
+            emit("    je " + nullLbl);
+
             emit("    mov rax, r9");
             emitPrintRax();
             emit("    pop r8");
@@ -908,6 +951,12 @@ namespace nasm
             emit("    push rbx");
             emit("    push rcx");
             emit("    push r8");
+
+            // Check if it's a null value
+            emit("    mov rbx, " + std::to_string(NULL_VALUE));
+            emit("    cmp r9, rbx");
+            emit("    je " + nullLbl);
+
             emit("    movq xmm0, r9");
             emitPrintDouble();
             emit("    pop r8");
@@ -921,6 +970,12 @@ namespace nasm
             emit("    push rbx");
             emit("    push rcx");
             emit("    push r8");
+
+            // Check if it's a null value
+            emit("    mov rbx, " + std::to_string(NULL_VALUE));
+            emit("    cmp r9, rbx");
+            emit("    je " + nullLbl);
+
             emit("    mov rsi, r9"); // String pointer
             std::string strlenLbl = newLabel("strlen");
             emit("    xor rcx, rcx");
@@ -945,8 +1000,48 @@ namespace nasm
             emit("    push rbx");
             emit("    push rcx");
             emit("    push r8");
+
+            // Check if it's a null value
+            emit("    mov rbx, " + std::to_string(NULL_VALUE));
+            emit("    cmp r9, rbx");
+            emit("    je " + nullLbl);
+
             emit("    mov rax, r9");
             emitPrintBool();
+            emit("    pop r8");
+            emit("    pop rcx");
+            emit("    pop rbx");
+            emit("    pop rax");
+            emit("    jmp " + nextLbl);
+
+            // Add handler for nested arrays
+            emit(arrayLbl + ":");
+            emit("    push rax");
+            emit("    push rbx");
+            emit("    push rcx");
+            emit("    push r8");
+
+            // Check if it's a null value
+            emit("    mov rbx, " + std::to_string(NULL_VALUE));
+            emit("    cmp r9, rbx");
+            emit("    je " + nullLbl);
+
+            // Print nested array recursively
+            // Print nested array recursively
+            printNestedArray("r9", 0);
+            emit("    pop r8");
+            emit("    pop rcx");
+            emit("    pop rbx");
+            emit("    pop rax");
+            emit("    jmp " + nextLbl);
+
+            // Add handler for null values
+            emit(nullLbl + ":");
+            emit("    push rax");
+            emit("    push rbx");
+            emit("    push rcx");
+            emit("    push r8");
+            emitPrintNull();
             emit("    pop r8");
             emit("    pop rcx");
             emit("    pop rbx");
@@ -966,6 +1061,239 @@ namespace nasm
             emit("    syscall");
         }
 
+        void printNestedArray(const std::string &arrayReg, int depth = 0)
+        {
+            // Prevent infinite recursion with a reasonable depth limit
+            if (depth > 10)
+            {
+                emit("    mov rax, 1");
+                emit("    mov rdi, 1");
+                emit("    lea rsi, [rel null_str]"); // Print "null" for too-deep nesting
+                emit("    mov rdx, 4");
+                emit("    syscall");
+                return;
+            }
+
+            emit("    mov rax, " + arrayReg);     // Array pointer
+            emit("    mov rbx, qword [rax]");     // Load array length
+            emit("    mov rcx, qword [rax + 8]"); // Load type array pointer
+            emit("    add rax, 16");              // Point to first element
+
+            // Print opening bracket
+            emit("    push rax");
+            emit("    push rbx");
+            emit("    push rcx");
+            emit("    mov rax, 1");
+            emit("    mov rdi, 1");
+            emit("    mov rsi, open_bracket");
+            emit("    mov rdx, 1");
+            emit("    syscall");
+            emit("    pop rcx");
+            emit("    pop rbx");
+            emit("    pop rax");
+
+            std::string loopLbl = newLabel("nested_loop");
+            std::string doneLbl = newLabel("nested_done");
+            std::string commaLbl = newLabel("nested_comma");
+
+            emit("    mov r8, 0"); // Index counter
+
+            emit(loopLbl + ":");
+            emit("    cmp r8, rbx");
+            emit("    jge " + doneLbl);
+
+            // Print comma if not first element
+            emit("    cmp r8, 0");
+            emit("    je " + commaLbl);
+
+            emit("    push rax");
+            emit("    push rbx");
+            emit("    push rcx");
+            emit("    push r8");
+            emit("    mov rax, 1");
+            emit("    mov rdi, 1");
+            emit("    mov rsi, comma_space");
+            emit("    mov rdx, 2");
+            emit("    syscall");
+            emit("    pop r8");
+            emit("    pop rcx");
+            emit("    pop rbx");
+            emit("    pop rax");
+
+            emit(commaLbl + ":");
+
+            // Get type and value for each element
+            emit("    push rax");
+            emit("    push rbx");
+            emit("    mov rbx, r8");
+            emit("    imul rbx, 8");
+            emit("    add rcx, rbx");
+            emit("    mov rdx, qword [rcx]"); // Type code
+            emit("    sub rcx, rbx");
+            emit("    pop rbx");
+            emit("    pop rax");
+
+            emit("    push rcx");
+            emit("    push rdx");
+            emit("    mov rcx, r8");
+            emit("    imul rcx, 8");
+            emit("    add rax, rcx");
+            emit("    mov r9, qword [rax]"); // Element value
+            emit("    sub rax, rcx");
+            emit("    pop rdx");
+            emit("    pop rcx");
+
+            // Print element based on type
+            std::string intLbl = newLabel("nested_int");
+            std::string floatLbl = newLabel("nested_float");
+            std::string stringLbl = newLabel("nested_string");
+            std::string boolLbl = newLabel("nested_bool");
+            std::string arrayLbl = newLabel("nested_array");
+            std::string nullLbl = newLabel("nested_null");
+            std::string nextLbl = newLabel("nested_next");
+
+            emit("    cmp rdx, 0");
+            emit("    je " + intLbl);
+            emit("    cmp rdx, 1");
+            emit("    je " + floatLbl);
+            emit("    cmp rdx, 2");
+            emit("    je " + stringLbl);
+            emit("    cmp rdx, 3");
+            emit("    je " + boolLbl);
+            emit("    cmp rdx, 4");
+            emit("    je " + arrayLbl);
+            emit("    jmp " + intLbl); // Default to int
+
+            emit(intLbl + ":");
+            emit("    push rax");
+            emit("    push rbx");
+            emit("    push rcx");
+            emit("    push r8");
+
+            // Check if it's a null value
+            emit("    mov rbx, " + std::to_string(NULL_VALUE));
+            emit("    cmp r9, rbx");
+            emit("    je " + nullLbl);
+
+            emit("    mov rax, r9");
+            emitPrintRax();
+            emit("    pop r8");
+            emit("    pop rcx");
+            emit("    pop rbx");
+            emit("    pop rax");
+            emit("    jmp " + nextLbl);
+
+            emit(floatLbl + ":");
+            emit("    push rax");
+            emit("    push rbx");
+            emit("    push rcx");
+            emit("    push r8");
+
+            // Check if it's a null value
+            emit("    mov rbx, " + std::to_string(NULL_VALUE));
+            emit("    cmp r9, rbx");
+            emit("    je " + nullLbl);
+
+            emit("    movq xmm0, r9");
+            emitPrintDouble();
+            emit("    pop r8");
+            emit("    pop rcx");
+            emit("    pop rbx");
+            emit("    pop rax");
+            emit("    jmp " + nextLbl);
+
+            emit(stringLbl + ":");
+            emit("    push rax");
+            emit("    push rbx");
+            emit("    push rcx");
+            emit("    push r8");
+
+            // Check if it's a null value
+            emit("    mov rbx, " + std::to_string(NULL_VALUE));
+            emit("    cmp r9, rbx");
+            emit("    je " + nullLbl);
+
+            emit("    mov rsi, r9");
+            std::string strlenLbl = newLabel("nested_strlen");
+            emit("    xor rcx, rcx");
+            emit(strlenLbl + "_loop:");
+            emit("    cmp byte [rsi+rcx], 0");
+            emit("    je " + strlenLbl + "_done");
+            emit("    inc rcx");
+            emit("    jmp " + strlenLbl + "_loop");
+            emit(strlenLbl + "_done:");
+            emit("    mov rdx, rcx");
+            emit("    mov rax, 1");
+            emit("    mov rdi, 1");
+            emit("    syscall");
+            emit("    pop r8");
+            emit("    pop rcx");
+            emit("    pop rbx");
+            emit("    pop rax");
+            emit("    jmp " + nextLbl);
+
+            emit(boolLbl + ":");
+            emit("    push rax");
+            emit("    push rbx");
+            emit("    push rcx");
+            emit("    push r8");
+
+            // Check if it's a null value
+            emit("    mov rbx, " + std::to_string(NULL_VALUE));
+            emit("    cmp r9, rbx");
+            emit("    je " + nullLbl);
+
+            emit("    mov rax, r9");
+            emitPrintBool();
+            emit("    pop r8");
+            emit("    pop rcx");
+            emit("    pop rbx");
+            emit("    pop rax");
+            emit("    jmp " + nextLbl);
+
+            emit(arrayLbl + ":");
+            emit("    push rax");
+            emit("    push rbx");
+            emit("    push rcx");
+            emit("    push r8");
+
+            // Check if it's a null value
+            emit("    mov rbx, " + std::to_string(NULL_VALUE));
+            emit("    cmp r9, rbx");
+            emit("    je " + nullLbl);
+
+            // Recursively print nested array with incremented depth
+            printNestedArray("r9", depth + 1);
+            emit("    pop r8");
+            emit("    pop rcx");
+            emit("    pop rbx");
+            emit("    pop rax");
+            emit("    jmp " + nextLbl);
+
+            emit(nullLbl + ":");
+            emit("    push rax");
+            emit("    push rbx");
+            emit("    push rcx");
+            emit("    push r8");
+            emitPrintNull();
+            emit("    pop r8");
+            emit("    pop rcx");
+            emit("    pop rbx");
+            emit("    pop rax");
+
+            emit(nextLbl + ":");
+            emit("    inc r8");
+            emit("    jmp " + loopLbl);
+
+            emit(doneLbl + ":");
+
+            // Print closing bracket
+            emit("    mov rax, 1");
+            emit("    mov rdi, 1");
+            emit("    mov rsi, close_bracket");
+            emit("    mov rdx, 1");
+            emit("    syscall");
+        }
         // First pass: walk function body to assign stack offsets for local variables
         void collectLocals(const StmtPtr &stmt, bool isTopLevel = false)
         {
@@ -1075,6 +1403,9 @@ namespace nasm
             emit("    syscall");
 
             genStmt(program);
+
+            // Emit error handlers at the end
+            emitErrorHandlers();
 
             // --- BSS for integer printing
             emit("section .bss");
@@ -2116,6 +2447,7 @@ namespace nasm
                 handleArrayExpr(arr);
             }
 
+            // In genExpr method, replace the IndexExpr case with this:
             else if (auto idx = std::dynamic_pointer_cast<IndexExpr>(expr))
             {
                 genExpr(idx->array); // Array pointer in rax
@@ -2131,11 +2463,24 @@ namespace nasm
                 // Bounds check
                 emitArrayBoundsCheck("rax", "rbx");
 
-                // Calculate offset: 8 + (index * 8)
+                // Get type information
+                emit("    push rax");                 // Save array pointer
+                emit("    push rbx");                 // Save index
+                emit("    mov rcx, qword [rax + 8]"); // Load type array pointer
+                emit("    imul rbx, 8");              // Index * 8 for type lookup
+                emit("    add rcx, rbx");
+                emit("    mov rdx, qword [rcx]"); // Load type code
+                emit("    pop rbx");              // Restore index
+                emit("    pop rax");              // Restore array pointer
+
+                // Calculate element offset: 16 + (index * 8)
                 emit("    imul rbx, 8");
-                emit("    add rbx, 8");
+                emit("    add rbx, 16"); // Skip length and type pointer
                 emit("    add rax, rbx");
                 emit("    mov rax, qword [rax]"); // Load element value
+
+                // For nested arrays (type code 4), rax now contains pointer to nested array
+                // This allows chaining like a[0][1]
             }
 
             else if (auto assign = std::dynamic_pointer_cast<ArrayAssignExpr>(expr))
