@@ -203,3 +203,74 @@ struct PrintStmt : Statement {
     ExprPtr expr;
     PrintStmt(const ExprPtr &e) : expr(e) {}
 };
+
+// Add this struct to your existing ast.h file
+struct TypeInfo {
+    std::string baseType;           // "int", "float", "bool", "string", "array"
+    bool isNullable = false;        // true if type ends with '?'
+    std::vector<int> dimensions;    // for multi-dimensional arrays [3][4] = {3, 4}
+    std::shared_ptr<TypeInfo> elementType; // for arrays, type of elements
+    
+    TypeInfo() = default;
+    TypeInfo(const std::string& base) : baseType(base) {}
+    
+    // Parse type string like "int[]?" or "float[3][4]"
+    static std::shared_ptr<TypeInfo> parse(const std::string& typeStr) {
+        auto type = std::make_shared<TypeInfo>();
+        std::string workStr = typeStr;
+        
+        // Check for nullable
+        if (!workStr.empty() && workStr.back() == '?') {
+            type->isNullable = true;
+            workStr.pop_back();
+        }
+        
+        // Parse array dimensions
+        size_t bracketPos = workStr.find('[');
+        if (bracketPos != std::string::npos) {
+            type->baseType = "array";
+            std::string baseTypeStr = workStr.substr(0, bracketPos);
+            type->elementType = std::make_shared<TypeInfo>(baseTypeStr);
+            
+            // Parse dimensions
+            std::string dimStr = workStr.substr(bracketPos);
+            std::regex dimRegex(R"(\[(\d*)\])");
+            std::sregex_iterator iter(dimStr.begin(), dimStr.end(), dimRegex);
+            std::sregex_iterator end;
+            
+            while (iter != end) {
+                std::string dimMatch = (*iter)[1].str();
+                if (dimMatch.empty()) {
+                    type->dimensions.push_back(-1); // dynamic size
+                } else {
+                    type->dimensions.push_back(std::stoi(dimMatch));
+                }
+                ++iter;
+            }
+        } else {
+            type->baseType = workStr;
+        }
+        
+        return type;
+    }
+    
+    std::string toString() const {
+        std::string result = baseType;
+        if (baseType == "array" && elementType) {
+            result = elementType->baseType;
+            for (int dim : dimensions) {
+                result += "[";
+                if (dim != -1) result += std::to_string(dim);
+                result += "]";
+            }
+        }
+        if (isNullable) result += "?";
+        return result;
+    }
+    
+    bool isArray() const { return baseType == "array"; }
+    int getDimensionality() const { return dimensions.size(); }
+    bool isDynamicSize(int dimIndex = 0) const { 
+    return dimIndex < static_cast<int>(dimensions.size()) && dimensions[dimIndex] == -1; 
+}
+};

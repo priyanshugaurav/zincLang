@@ -1,8 +1,5 @@
 fn main() {
-    var x = 10;
-    {
-        var y = 20
-        print(y) //should be 20
-    }
-    print(x) //should be 10
+    var a = [[10,20],2,3,4]
+    var i = 0;
+    print(a[0][0])
 }
