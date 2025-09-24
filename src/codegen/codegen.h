@@ -1385,6 +1385,12 @@ namespace nasm
             {
                 collectLocals(t->body, isTopLevel);
             }
+            else if (auto forStmt = std::dynamic_pointer_cast<ForStmt>(stmt))
+            {
+                // The iterator variable will be handled during code generation
+                // Just collect locals from the body
+                collectLocals(forStmt->body, isTopLevel);
+            }
         }
         void generate(StmtPtr program)
         {
@@ -1772,6 +1778,59 @@ namespace nasm
                 emit("    add rsp, 16"); // restore stack
             }
 
+            // Replace the ForStmt handling in genStmt method with this corrected version:
+
+else if (auto forStmt = std::dynamic_pointer_cast<ForStmt>(stmt))
+{
+    std::string startLbl = newLabel("for_start");
+    std::string endLbl = newLabel("for_end");
+
+    // Generate the iterable expression (should be an array)
+    genExpr(forStmt->iterable);
+
+    // Check for null array
+    emitNullCheck("rax");
+
+    // Allocate space for loop control variables on stack (16-byte aligned)
+    emit("    sub rsp, 16");           // array_ptr, array_length
+    emit("    mov [rsp], rax");        // Store array pointer
+    emit("    mov rbx, qword [rax]");  // Load array length
+    emit("    mov [rsp+8], rbx");      // Store array length
+
+    // Add iterator variable to scope - this will hold the INDEX
+    stackOffset -= 8;
+    int iteratorOffset = stackOffset;
+    varTable[forStmt->iterator] = iteratorOffset;
+    varTypes[forStmt->iterator] = "int"; // Iterator is always an integer index
+
+    // Initialize iterator to 0
+    emit("    mov qword " + slot(iteratorOffset) + ", 0");
+
+    emit(startLbl + ":");
+    // Load current state
+    emit("    mov rax, [rsp]");         // Array pointer
+    emit("    mov rbx, [rsp+8]");       // Array length
+    emit("    mov rcx, " + slot(iteratorOffset)); // Current index
+
+    // Check if we've reached the end
+    emit("    cmp rcx, rbx");
+    emit("    jge " + endLbl);
+
+    // Generate loop body (iterator variable contains the current index)
+    genStmt(forStmt->body);
+
+    // Increment index
+    emit("    inc qword " + slot(iteratorOffset));
+    emit("    jmp " + startLbl);
+
+    emit(endLbl + ":");
+
+    // Clean up
+    emit("    add rsp, 16");           // Remove loop control variables
+    stackOffset += 8;                  // Restore stack offset for iterator
+    varTable.erase(forStmt->iterator); // Remove iterator from scope
+    varTypes.erase(forStmt->iterator);
+}
             else if (auto p = std::dynamic_pointer_cast<PrintStmt>(stmt))
             {
                 // Generate code to print an expression. We won't rely on an external

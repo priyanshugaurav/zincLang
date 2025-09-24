@@ -239,113 +239,113 @@ void TypeChecker::checkStmt(const StmtPtr &stmt)
 
     // ---------------------------
     // VarDecl
-// REPLACE the VarDecl section in checkStmt with this fixed version:
+    // REPLACE the VarDecl section in checkStmt with this fixed version:
 
-if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
-{
-    bool nullable = false;
-    std::string baseType = v->typeHint;
+    if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
+    {
+        bool nullable = false;
+        std::string baseType = v->typeHint;
 
-    // check for nullable type
-    if (!v->typeHint.empty() && v->typeHint.back() == '?')
-    {
-        nullable = true;
-        baseType.pop_back(); // remove '?'
-    }
+        // check for nullable type
+        if (!v->typeHint.empty() && v->typeHint.back() == '?')
+        {
+            nullable = true;
+            baseType.pop_back(); // remove '?'
+        }
 
-    // FIXED: let (immutable) variables cannot be nullable - they must be initialized with concrete values
-    if (!v->isMutable && nullable)
-    {
-        throw std::runtime_error("Immutable variable (let) cannot be nullable: " + v->name);
-    }
-    
-    // Non-nullable explicitly typed vars must be initialized
-    if (!baseType.empty() && !nullable && !v->initializer)
-    {
-        throw std::runtime_error("Variable '" + v->name + "' of non-nullable type '" + baseType + "' must be initialized at declaration");
-    }
+        // FIXED: let (immutable) variables cannot be nullable - they must be initialized with concrete values
+        if (!v->isMutable && nullable)
+        {
+            throw std::runtime_error("Immutable variable (let) cannot be nullable: " + v->name);
+        }
 
-    // FIXED: let variables must be initialized (no uninitialized let constants)
-    if (!v->isMutable && !v->initializer)
-    {
-        throw std::runtime_error("Immutable variable (let) '" + v->name + "' must be initialized at declaration");
-    }
+        // Non-nullable explicitly typed vars must be initialized
+        if (!baseType.empty() && !nullable && !v->initializer)
+        {
+            throw std::runtime_error("Variable '" + v->name + "' of non-nullable type '" + baseType + "' must be initialized at declaration");
+        }
 
-    // Infer type for untyped vars
-    bool isDynamic = false;
-    if (baseType.empty())
-    {
-        isDynamic = true; // no type hint => dynamic
+        // FIXED: let variables must be initialized (no uninitialized let constants)
+        if (!v->isMutable && !v->initializer)
+        {
+            throw std::runtime_error("Immutable variable (let) '" + v->name + "' must be initialized at declaration");
+        }
+
+        // Infer type for untyped vars
+        bool isDynamic = false;
+        if (baseType.empty())
+        {
+            isDynamic = true; // no type hint => dynamic
+            if (v->initializer)
+            {
+                baseType = inferExpr(v->initializer);
+                // FIXED: For dynamic vars, if initialized with null, allow it and set type appropriately
+                // But NOT for let constants
+                if (baseType == "null")
+                {
+                    if (!v->isMutable) // let constant cannot be null
+                    {
+                        throw std::runtime_error("Immutable variable (let) '" + v->name + "' cannot be initialized with null");
+                    }
+                    baseType = "any"; // Dynamic variables can hold null
+                    nullable = true;  // Mark as nullable since it contains null
+                }
+            }
+            else
+            {
+                // Only mutable vars can be uninitialized
+                if (v->isMutable)
+                {
+                    baseType = "any"; // placeholder type until assigned
+                    nullable = true;  // Uninitialized dynamic vars can be null
+                }
+                // let constants must be initialized (handled above)
+            }
+        }
+
+        // initializer exists, check type match for explicitly typed
         if (v->initializer)
         {
-            baseType = inferExpr(v->initializer);
-            // FIXED: For dynamic vars, if initialized with null, allow it and set type appropriately
-            // But NOT for let constants
-            if (baseType == "null")
+            std::string initType = inferExpr(v->initializer);
+
+            if (initType == "null")
             {
-                if (!v->isMutable) // let constant cannot be null
+                // FIXED: let constants cannot be null
+                if (!v->isMutable)
                 {
                     throw std::runtime_error("Immutable variable (let) '" + v->name + "' cannot be initialized with null");
                 }
-                baseType = "any"; // Dynamic variables can hold null
-                nullable = true;  // Mark as nullable since it contains null
+                // FIXED: Allow null for dynamic variables (var only)
+                if (!nullable && !isDynamic)
+                {
+                    throw std::runtime_error("Cannot assign null to non-nullable variable '" + v->name + "'");
+                }
+                // For dynamic vars or nullable vars, null is allowed
             }
-        }
-        else
-        {
-            // Only mutable vars can be uninitialized
-            if (v->isMutable)
+            else if (!isDynamic && !isArrayCompatible(baseType, initType))
             {
-                baseType = "any"; // placeholder type until assigned
-                nullable = true;  // Uninitialized dynamic vars can be null
+                // Only check type compatibility for non-dynamic variables
+                throw std::runtime_error("Type mismatch for variable '" + v->name +
+                                         "': expected " + baseType + ", got " + initType);
             }
-            // let constants must be initialized (handled above)
+
+            // If dynamic, update type to initializer type (but keep it as "any" if null)
+            if (isDynamic && initType != "null")
+            {
+                baseType = initType;
+            }
         }
+
+        // define variable in environment
+        if (!env->define(v->name, baseType, v->isMutable, -1, isDynamic, nullable))
+        {
+            throw std::runtime_error("Symbol already defined in this scope: " + v->name);
+        }
+
+        return;
     }
 
-    // initializer exists, check type match for explicitly typed
-    if (v->initializer)
-    {
-        std::string initType = inferExpr(v->initializer);
-
-        if (initType == "null")
-        {
-            // FIXED: let constants cannot be null
-            if (!v->isMutable)
-            {
-                throw std::runtime_error("Immutable variable (let) '" + v->name + "' cannot be initialized with null");
-            }
-            // FIXED: Allow null for dynamic variables (var only)
-            if (!nullable && !isDynamic)
-            {
-                throw std::runtime_error("Cannot assign null to non-nullable variable '" + v->name + "'");
-            }
-            // For dynamic vars or nullable vars, null is allowed
-        }
-        else if (!isDynamic && !isArrayCompatible(baseType, initType))
-        {
-            // Only check type compatibility for non-dynamic variables
-            throw std::runtime_error("Type mismatch for variable '" + v->name +
-                                     "': expected " + baseType + ", got " + initType);
-        }
-
-        // If dynamic, update type to initializer type (but keep it as "any" if null)
-        if (isDynamic && initType != "null")
-        {
-            baseType = initType;
-        }
-    }
-
-    // define variable in environment
-    if (!env->define(v->name, baseType, v->isMutable, -1, isDynamic, nullable))
-    {
-        throw std::runtime_error("Symbol already defined in this scope: " + v->name);
-    }
-
-    return;
-}   
-
-// ExprStmt
+    // ExprStmt
     if (auto e = std::dynamic_pointer_cast<ExprStmt>(stmt))
     {
         // expression must be well-typed
@@ -361,72 +361,72 @@ if (auto v = std::dynamic_pointer_cast<VarDecl>(stmt))
     // ReturnStmt
     // Replace your ReturnStmt handling with this improved version:
 
-if (auto r = std::dynamic_pointer_cast<ReturnStmt>(stmt))
-{
-    if (r->value)
+    if (auto r = std::dynamic_pointer_cast<ReturnStmt>(stmt))
     {
-        std::string t = inferExpr(r->value);
-
-        // If in inference mode (function had no declared return type),
-        // allow the first return to set the inferred type.
-        if (currentReturnType == "__INFER_RET__")
+        if (r->value)
         {
-            // Set inferred return type
-            currentReturnType = t;
-            return;
-        }
+            std::string t = inferExpr(r->value);
 
-        // If currentReturnType empty -> function declared void / no return allowed with value
-        if (currentReturnType.empty())
-        {
-            throw std::runtime_error("Return with value in a function declared void / no return type");
-        }
-
-        // IMPROVED: Handle "any" type compatibility
-        if (t != currentReturnType)
-        {
-            // Allow "any" to match with anything (for dynamic typing)
-            if (t == "any" || currentReturnType == "any")
+            // If in inference mode (function had no declared return type),
+            // allow the first return to set the inferred type.
+            if (currentReturnType == "__INFER_RET__")
             {
-                // If either is "any", allow it - this supports dynamic typing
-                // Update currentReturnType to be more specific if possible
-                if (currentReturnType == "any" && t != "any")
-                {
-                    currentReturnType = t; // Make return type more specific
-                }
+                // Set inferred return type
+                currentReturnType = t;
                 return;
             }
-            
-            // Allow int -> float widening
-            if (!(isIntType(t) && isFloatType(currentReturnType)))
+
+            // If currentReturnType empty -> function declared void / no return allowed with value
+            if (currentReturnType.empty())
             {
-                throw std::runtime_error("Return type mismatch: expected " + currentReturnType + ", got " + t);
+                throw std::runtime_error("Return with value in a function declared void / no return type");
+            }
+
+            // IMPROVED: Handle "any" type compatibility
+            if (t != currentReturnType)
+            {
+                // Allow "any" to match with anything (for dynamic typing)
+                if (t == "any" || currentReturnType == "any")
+                {
+                    // If either is "any", allow it - this supports dynamic typing
+                    // Update currentReturnType to be more specific if possible
+                    if (currentReturnType == "any" && t != "any")
+                    {
+                        currentReturnType = t; // Make return type more specific
+                    }
+                    return;
+                }
+
+                // Allow int -> float widening
+                if (!(isIntType(t) && isFloatType(currentReturnType)))
+                {
+                    throw std::runtime_error("Return type mismatch: expected " + currentReturnType + ", got " + t);
+                }
             }
         }
-    }
-    else
-    {
-        // return without value
-        if (currentReturnType.empty())
+        else
         {
-            // function declared void -> okay
-            return;
-        }
+            // return without value
+            if (currentReturnType.empty())
+            {
+                // function declared void -> okay
+                return;
+            }
 
-        if (currentReturnType == "__INFER_RET__")
-        {
-            // no previous typed return seen, mark inferred as void
-            currentReturnType = "void";
-            return;
-        }
+            if (currentReturnType == "__INFER_RET__")
+            {
+                // no previous typed return seen, mark inferred as void
+                currentReturnType = "void";
+                return;
+            }
 
-        if (currentReturnType != "void" && currentReturnType != "any")
-        {
-            throw std::runtime_error("Return without value in function that expects type " + currentReturnType);
+            if (currentReturnType != "void" && currentReturnType != "any")
+            {
+                throw std::runtime_error("Return without value in function that expects type " + currentReturnType);
+            }
         }
+        return;
     }
-    return;
-}
     // BlockStmt
     if (auto b = std::dynamic_pointer_cast<BlockStmt>(stmt))
     {
@@ -461,19 +461,25 @@ if (auto r = std::dynamic_pointer_cast<ReturnStmt>(stmt))
     }
 
     // ForStmt: for iterator in iterable { ... }
+    // Replace the ForStmt handling in checkStmt with this corrected version:
+
+    // ForStmt: for iterator in iterable { ... }
     if (auto f = std::dynamic_pointer_cast<ForStmt>(stmt))
     {
         std::string iterType = inferExpr(f->iterable);
-        if (!isArrayType(iterType))
+
+        // ENHANCED: Allow array<any> and any as valid iterable types
+        // This handles cases where mixed arrays result in array<any> or any types
+        if (!isArrayType(iterType) && iterType != "any" && iterType != "array<any>")
         {
             throw std::runtime_error("For loop iterable must be array, got " + iterType);
         }
-        std::string elemType = arrayElementType(iterType);
 
-        // new child env with iterator declared as let
+        // The iterator variable holds the INDEX (int), not the element value
+        // Create new child environment with iterator declared as immutable int
         auto oldEnv = env;
         env = std::make_shared<Environment>(oldEnv);
-        if (!env->define(f->iterator, elemType, false))
+        if (!env->define(f->iterator, "int", false)) // iterator is int type, immutable
         {
             throw std::runtime_error("Iterator name already used in this scope: " + f->iterator);
         }
@@ -500,90 +506,90 @@ if (auto r = std::dynamic_pointer_cast<ReturnStmt>(stmt))
     // FuncDecl
     // REPLACE your FuncDecl handling in checkStmt with this:
 
-if (auto fn = std::dynamic_pointer_cast<FuncDecl>(stmt))
-{
-    // Build function signature
-    std::ostringstream sig;
-    sig << "fn(";
-    for (size_t i = 0; i < fn->params.size(); ++i)
+    if (auto fn = std::dynamic_pointer_cast<FuncDecl>(stmt))
     {
-        if (i)
-            sig << ",";
-        std::string ptype = fn->params[i].second.empty() ? "any" : fn->params[i].second;
-        sig << ptype;
-    }
-    sig << ")->";
-
-    // FIXED: For functions without declared return type, use "any" initially
-    // This allows proper type inference to work
-    std::string initialReturnType;
-    if (fn->returnType.empty())
-    {
-        initialReturnType = "any";  // Changed from "void" to "any"
-    }
-    else
-    {
-        initialReturnType = fn->returnType;
-    }
-    sig << initialReturnType;
-
-    // Define the function in the current environment FIRST
-    if (!env->define(fn->name, sig.str(), false))
-    {
-        throw std::runtime_error("Function already defined: " + fn->name);
-    }
-
-    // Save current state for nested function processing
-    auto oldEnv = env;
-    env = std::make_shared<Environment>(oldEnv);
-
-    // Add parameters to new environment
-    for (auto &p : fn->params)
-    {
-        const std::string &pname = p.first;
-        const std::string ptype = p.second.empty() ? "any" : p.second;
-        if (!env->define(pname, ptype, false))
+        // Build function signature
+        std::ostringstream sig;
+        sig << "fn(";
+        for (size_t i = 0; i < fn->params.size(); ++i)
         {
-            throw std::runtime_error("Parameter name already used in function '" + fn->name + "': " + pname);
+            if (i)
+                sig << ",";
+            std::string ptype = fn->params[i].second.empty() ? "any" : fn->params[i].second;
+            sig << ptype;
         }
-    }
+        sig << ")->";
 
-    // Set up return type checking
-    std::string oldReturn = currentReturnType;
-    if (fn->returnType.empty())
-        currentReturnType = "__INFER_RET__";
-    else
-        currentReturnType = fn->returnType;
-
-    // Check function body
-    if (auto bodyBlock = std::dynamic_pointer_cast<BlockStmt>(fn->body))
-    {
-        checkBlock(bodyBlock->statements);
-    }
-    else
-    {
-        checkStmt(fn->body);
-    }
-
-    // Handle return type inference
-    if (fn->returnType.empty())
-    {
-        std::string actualReturnType;
-        if (currentReturnType == "__INFER_RET__")
+        // FIXED: For functions without declared return type, use "any" initially
+        // This allows proper type inference to work
+        std::string initialReturnType;
+        if (fn->returnType.empty())
         {
-            actualReturnType = "void"; // No return statements found
+            initialReturnType = "any"; // Changed from "void" to "any"
         }
         else
         {
-            actualReturnType = currentReturnType; // Inferred from return statements
+            initialReturnType = fn->returnType;
         }
-    }
+        sig << initialReturnType;
 
-    // Restore environment and return type
-    env = oldEnv;
-    currentReturnType = oldReturn;
-    return;
-}
+        // Define the function in the current environment FIRST
+        if (!env->define(fn->name, sig.str(), false))
+        {
+            throw std::runtime_error("Function already defined: " + fn->name);
+        }
+
+        // Save current state for nested function processing
+        auto oldEnv = env;
+        env = std::make_shared<Environment>(oldEnv);
+
+        // Add parameters to new environment
+        for (auto &p : fn->params)
+        {
+            const std::string &pname = p.first;
+            const std::string ptype = p.second.empty() ? "any" : p.second;
+            if (!env->define(pname, ptype, false))
+            {
+                throw std::runtime_error("Parameter name already used in function '" + fn->name + "': " + pname);
+            }
+        }
+
+        // Set up return type checking
+        std::string oldReturn = currentReturnType;
+        if (fn->returnType.empty())
+            currentReturnType = "__INFER_RET__";
+        else
+            currentReturnType = fn->returnType;
+
+        // Check function body
+        if (auto bodyBlock = std::dynamic_pointer_cast<BlockStmt>(fn->body))
+        {
+            checkBlock(bodyBlock->statements);
+        }
+        else
+        {
+            checkStmt(fn->body);
+        }
+
+        // Handle return type inference
+        if (fn->returnType.empty())
+        {
+            std::string actualReturnType;
+            if (currentReturnType == "__INFER_RET__")
+            {
+                actualReturnType = "void"; // No return statements found
+            }
+            else
+            {
+                actualReturnType = currentReturnType; // Inferred from return statements
+            }
+        }
+
+        // Restore environment and return type
+        env = oldEnv;
+        currentReturnType = oldReturn;
+        return;
+    }
     // Unknown statement
     throw std::runtime_error("Unhandled statement in typechecker");
 }
@@ -662,14 +668,14 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
                 // Allow null for dynamic mutable variables or explicitly nullable mutable variables
                 if (!symOpt->isNullable && !symOpt->isDynamic)
                     throw std::runtime_error("Cannot assign null to non-nullable variable '" + lhsId->name + "'");
-                
+
                 // For dynamic vars, update to allow null storage
                 if (symOpt->isDynamic)
                 {
                     symOpt->isNullable = true; // Mark as nullable since it now contains null
-                    symOpt->type = "any"; // Keep as any type for flexibility
+                    symOpt->type = "any";      // Keep as any type for flexibility
                 }
-                
+
                 return symOpt->type; // keep declared type
             }
 
@@ -735,10 +741,11 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
                 return "bool";
 
             // Handle nullable types - strip ? for comparison
-            auto stripNullable = [](const std::string& type) {
+            auto stripNullable = [](const std::string &type)
+            {
                 return (!type.empty() && type.back() == '?') ? type.substr(0, type.size() - 1) : type;
             };
-            
+
             std::string baseL = stripNullable(L);
             std::string baseR = stripNullable(R);
 
@@ -888,6 +895,9 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
     }
 
     // IndexExpr: arr[idx]
+    // Replace the IndexExpr handling in inferExpr with this enhanced version:
+
+    // IndexExpr: arr[idx]
     if (auto idx = std::dynamic_pointer_cast<IndexExpr>(expr))
     {
         std::string arrType = inferExpr(idx->array);
@@ -903,7 +913,44 @@ std::string TypeChecker::inferExpr(const ExprPtr &expr)
             return "any";
         }
 
-        // Compile-time bounds check
+        // ENHANCED: Try to infer more specific types for literal array indexing
+        if (auto arrId = std::dynamic_pointer_cast<IdentifierExpr>(idx->array))
+        {
+            if (auto idxLit = std::dynamic_pointer_cast<LiteralExpr>(idx->index))
+            {
+                // Try to get the actual array expression from the environment
+                auto symOpt = env->lookup(arrId->name);
+                if (symOpt.has_value())
+                {
+                    // If we can determine this is indexing into a known heterogeneous array
+                    // and we know the specific index, try to return a more specific type
+
+                    // For now, let's handle the common case where we're accessing a nested array
+                    // If the base array type is array<any> but we're accessing a specific index
+                    // that we know contains an array, we can be more specific
+
+                    int indexValue = std::stoi(idxLit->value);
+
+                    // Special handling: if this looks like accessing a nested array in a mixed array
+                    // we can assume it's an array type rather than just "any"
+                    if (arrType == "array<any>")
+                    {
+                        // This is a heuristic: if we're indexing into array<any> with a literal index,
+                        // and later this result is used as iterable in a for loop,
+                        // assume it could be an array
+                        //
+                        // For more robust handling, you'd need to track the actual values
+                        // or have runtime type information. For now, we'll use a practical approach:
+
+                        // Return array<any> to indicate it could be an array
+                        // The ForStmt check will be updated to handle this case
+                        return "array<any>";
+                    }
+                }
+            }
+        }
+
+        // Compile-time bounds check (existing code)
         auto symOpt = std::dynamic_pointer_cast<IdentifierExpr>(idx->array)
                           ? env->lookup(std::dynamic_pointer_cast<IdentifierExpr>(idx->array)->name)
                           : std::nullopt;
