@@ -411,6 +411,7 @@ namespace nasm
                 }
                 return "int";
             }
+            
             else if (auto arr = std::dynamic_pointer_cast<ArrayExpr>(expr))
             {
                 if (arr->elements.empty())
@@ -432,7 +433,47 @@ namespace nasm
             }
             else if (auto idx = std::dynamic_pointer_cast<IndexExpr>(expr))
             {
-                handleIndexExpr(idx);
+                // Get the array type
+                std::string arrayType = getExprType(idx->array);
+
+                // Parse array type to extract element type
+                if (arrayType.find("array<") == 0 && arrayType.back() == '>')
+                {
+                    // Extract element type from array<element_type>
+                    size_t start = 6;                    // after "array<"
+                    size_t end = arrayType.length() - 1; // before ">"
+                    return arrayType.substr(start, end - start);
+                }
+
+                // For dynamic arrays or unknown types, try to infer from the array variable
+                if (auto arrayId = std::dynamic_pointer_cast<IdentifierExpr>(idx->array))
+                {
+                    auto typeIt = varTypeInfo.find(arrayId->name);
+                    if (typeIt != varTypeInfo.end() && typeIt->second->elementType)
+                    {
+                        return typeIt->second->elementType->baseType;
+                    }
+
+                    // Fallback: check if we stored element types during array creation
+                    auto elemIt = arrayElementTypes.find(arrayId->name);
+                    if (elemIt != arrayElementTypes.end() && !elemIt->second.empty())
+                    {
+                        // Try to get the type of the specific index if it's a constant
+                        if (auto indexLit = std::dynamic_pointer_cast<LiteralExpr>(idx->index))
+                        {
+                            int indexVal = std::stoi(indexLit->value);
+                            if (indexVal >= 0 && indexVal < static_cast<int>(elemIt->second.size()))
+                            {
+                                return elemIt->second[indexVal];
+                            }
+                        }
+                        // Return the type of the first element as a best guess
+                        return elemIt->second[0];
+                    }
+                }
+                
+
+                return "int"; // default fallback
             }
             else if (auto bin = std::dynamic_pointer_cast<BinaryExpr>(expr))
             {
@@ -1590,6 +1631,15 @@ namespace nasm
                         emit("    mov " + slot(off) + ", rax");
                     }
                 }
+                // After genExpr(v->initializer), add:
+                if (auto arrInit = std::dynamic_pointer_cast<ArrayExpr>(v->initializer))
+                {
+                    for (int i = 0; i < static_cast<int>(arrInit->elements.size()); ++i)
+                    {
+                        std::string elemType = getExprType(arrInit->elements[i]);
+                        storeArrayElement(v->name, i, elemType);
+                    }
+                }
                 else
                 {
                     int off = varTable[v->name];
@@ -1780,57 +1830,57 @@ namespace nasm
 
             // Replace the ForStmt handling in genStmt method with this corrected version:
 
-else if (auto forStmt = std::dynamic_pointer_cast<ForStmt>(stmt))
-{
-    std::string startLbl = newLabel("for_start");
-    std::string endLbl = newLabel("for_end");
+            else if (auto forStmt = std::dynamic_pointer_cast<ForStmt>(stmt))
+            {
+                std::string startLbl = newLabel("for_start");
+                std::string endLbl = newLabel("for_end");
 
-    // Generate the iterable expression (should be an array)
-    genExpr(forStmt->iterable);
+                // Generate the iterable expression (should be an array)
+                genExpr(forStmt->iterable);
 
-    // Check for null array
-    emitNullCheck("rax");
+                // Check for null array
+                emitNullCheck("rax");
 
-    // Allocate space for loop control variables on stack (16-byte aligned)
-    emit("    sub rsp, 16");           // array_ptr, array_length
-    emit("    mov [rsp], rax");        // Store array pointer
-    emit("    mov rbx, qword [rax]");  // Load array length
-    emit("    mov [rsp+8], rbx");      // Store array length
+                // Allocate space for loop control variables on stack (16-byte aligned)
+                emit("    sub rsp, 16");          // array_ptr, array_length
+                emit("    mov [rsp], rax");       // Store array pointer
+                emit("    mov rbx, qword [rax]"); // Load array length
+                emit("    mov [rsp+8], rbx");     // Store array length
 
-    // Add iterator variable to scope - this will hold the INDEX
-    stackOffset -= 8;
-    int iteratorOffset = stackOffset;
-    varTable[forStmt->iterator] = iteratorOffset;
-    varTypes[forStmt->iterator] = "int"; // Iterator is always an integer index
+                // Add iterator variable to scope - this will hold the INDEX
+                stackOffset -= 8;
+                int iteratorOffset = stackOffset;
+                varTable[forStmt->iterator] = iteratorOffset;
+                varTypes[forStmt->iterator] = "int"; // Iterator is always an integer index
 
-    // Initialize iterator to 0
-    emit("    mov qword " + slot(iteratorOffset) + ", 0");
+                // Initialize iterator to 0
+                emit("    mov qword " + slot(iteratorOffset) + ", 0");
 
-    emit(startLbl + ":");
-    // Load current state
-    emit("    mov rax, [rsp]");         // Array pointer
-    emit("    mov rbx, [rsp+8]");       // Array length
-    emit("    mov rcx, " + slot(iteratorOffset)); // Current index
+                emit(startLbl + ":");
+                // Load current state
+                emit("    mov rax, [rsp]");                   // Array pointer
+                emit("    mov rbx, [rsp+8]");                 // Array length
+                emit("    mov rcx, " + slot(iteratorOffset)); // Current index
 
-    // Check if we've reached the end
-    emit("    cmp rcx, rbx");
-    emit("    jge " + endLbl);
+                // Check if we've reached the end
+                emit("    cmp rcx, rbx");
+                emit("    jge " + endLbl);
 
-    // Generate loop body (iterator variable contains the current index)
-    genStmt(forStmt->body);
+                // Generate loop body (iterator variable contains the current index)
+                genStmt(forStmt->body);
 
-    // Increment index
-    emit("    inc qword " + slot(iteratorOffset));
-    emit("    jmp " + startLbl);
+                // Increment index
+                emit("    inc qword " + slot(iteratorOffset));
+                emit("    jmp " + startLbl);
 
-    emit(endLbl + ":");
+                emit(endLbl + ":");
 
-    // Clean up
-    emit("    add rsp, 16");           // Remove loop control variables
-    stackOffset += 8;                  // Restore stack offset for iterator
-    varTable.erase(forStmt->iterator); // Remove iterator from scope
-    varTypes.erase(forStmt->iterator);
-}
+                // Clean up
+                emit("    add rsp, 16");           // Remove loop control variables
+                stackOffset += 8;                  // Restore stack offset for iterator
+                varTable.erase(forStmt->iterator); // Remove iterator from scope
+                varTypes.erase(forStmt->iterator);
+            }
             else if (auto p = std::dynamic_pointer_cast<PrintStmt>(stmt))
             {
                 // Generate code to print an expression. We won't rely on an external
@@ -1907,6 +1957,7 @@ else if (auto forStmt = std::dynamic_pointer_cast<ForStmt>(stmt))
                     emit("    mov rax, " + slot(off));
                 }
             }
+            
             // REPLACE the entire binary expression handling in genExpr with this corrected version:
 
             else if (auto bin = std::dynamic_pointer_cast<BinaryExpr>(expr))
@@ -2290,6 +2341,9 @@ else if (auto forStmt = std::dynamic_pointer_cast<ForStmt>(stmt))
                     }
                 }
                 // Handle arithmetic and other operations
+                // In your BinaryExpr handling in genExpr, replace the type detection logic with this:
+
+                // Handle arithmetic and other operations
                 else
                 {
                     // Check if we're dealing with float operations
@@ -2305,6 +2359,12 @@ else if (auto forStmt = std::dynamic_pointer_cast<ForStmt>(stmt))
                     {
                         leftIsFloat = (leftLit->type == "float");
                     }
+                    else if (auto leftIdx = std::dynamic_pointer_cast<IndexExpr>(bin->lhs))
+                    {
+                        // ADDED: Check if IndexExpr returns float
+                        std::string idxType = getExprType(leftIdx);
+                        leftIsFloat = (idxType == "float");
+                    }
 
                     // Check right operand
                     if (auto rightId = std::dynamic_pointer_cast<IdentifierExpr>(bin->rhs))
@@ -2315,6 +2375,12 @@ else if (auto forStmt = std::dynamic_pointer_cast<ForStmt>(stmt))
                     else if (auto rightLit = std::dynamic_pointer_cast<LiteralExpr>(bin->rhs))
                     {
                         rightIsFloat = (rightLit->type == "float");
+                    }
+                    else if (auto rightIdx = std::dynamic_pointer_cast<IndexExpr>(bin->rhs))
+                    {
+                        // ADDED: Check if IndexExpr returns float
+                        std::string idxType = getExprType(rightIdx);
+                        rightIsFloat = (idxType == "float");
                     }
 
                     if (leftIsFloat || rightIsFloat)
@@ -2360,7 +2426,7 @@ else if (auto forStmt = std::dynamic_pointer_cast<ForStmt>(stmt))
                     }
                     else
                     {
-                        // Integer operations
+                        // Integer operations (unchanged)
                         genExpr(bin->lhs);
                         emit("    push rax");
                         genExpr(bin->rhs);

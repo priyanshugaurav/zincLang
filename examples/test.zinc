@@ -1,7 +1,7 @@
 fn main() {
-    var arr = [20,2,3,40,[1,20.2,30.34,10],6]
-    for i in arr[4]{
-        print(arr[4][i])
+    var arr:array<float> = [2.3,2.3,3.3,4.3,5.3]
+    for i in arr{
+        print(arr[i] + 2.7)
         print(" ,  ")
     }
 }
