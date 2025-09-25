@@ -10,16 +10,13 @@ class Parser
 public:
     Parser(const std::vector<Token> &tokens);
     StmtPtr parse();
-    // Entry point: parse the whole program
+
     std::vector<StmtPtr> parseProgram();
 
 private:
     const std::vector<Token> &tokens;
     size_t current = 0;
 
-    // -------------------
-    // Helpers
-    // -------------------
     const Token &peek() const;
     const Token &previous() const;
     bool match(const std::vector<TokenType> &types);
@@ -29,9 +26,6 @@ private:
     void consume(TokenType type, const std::string &msg);
     const Token &peekNext() const;
 
-    // -------------------
-    // Parsing rules
-    // -------------------
     StmtPtr declaration();
     StmtPtr varDeclaration();
     StmtPtr statement();
@@ -42,8 +36,8 @@ private:
     StmtPtr returnStatement();
     StmtPtr expressionStatement();
     StmtPtr functionDeclaration();
-    StmtPtr blockStatement();                // consumes '{'
-    StmtPtr blockStatementAlreadyConsumed(); // assumes '{' already consumed
+    StmtPtr blockStatement();                
+    StmtPtr blockStatementAlreadyConsumed(); 
     StmtPtr finishBlock();
 
     ExprPtr expression();
@@ -71,8 +65,5 @@ private:
     ExprPtr finishCall(ExprPtr callee);
     ExprPtr indexExpr(ExprPtr array);
 
-    // -------------------
-    // Utilities
-    // -------------------
     void synchronize();
 };

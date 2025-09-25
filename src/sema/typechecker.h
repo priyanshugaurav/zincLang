@@ -10,7 +10,6 @@ class TypeChecker {
 public:
     TypeChecker(std::shared_ptr<Environment> env);
 
-    // --- Utility type checks ---
     bool isNumericType(const std::string &t) const;
     bool isIntType(const std::string &t) const;
     bool isFloatType(const std::string &t) const;
@@ -21,14 +20,13 @@ public:
     std::string inferIndexedType(const ExprPtr &arrayExpr, int levels) ;
     std::string unifyTypes(const std::string &a, const std::string &b) ;
     bool isAnyType(const std::string &t) const;
+    bool isDynamicType(const std::string &t) const ;
 
-    // 🔥 Add this declaration
     bool isArrayCompatible(const std::string &declared, const std::string &inferred) const;
     bool isAssignable(const std::string &from, const std::string &to) const;
     bool isNullableType(const std::string& t) const ;
     std::string getArrayElementType(const ExprPtr &expr);
 
-    // ---------------------------
     void check(const StmtPtr &program);
     void checkStmt(const StmtPtr &stmt);
     void checkBlock(const std::vector<StmtPtr> &stmts);

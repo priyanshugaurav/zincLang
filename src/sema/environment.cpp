@@ -15,15 +15,12 @@ bool Environment::define(const std::string &name, const std::string &type, bool 
     sym.arraySize = arraySize;
 
     if (type.rfind("array<", 0) == 0 && type.back() == '>') {
-        sym.elementType = type.substr(6, type.size() - 7); // array<int> -> int
+        sym.elementType = type.substr(6, type.size() - 7); 
     }
 
     table[name] = sym;
     return true;
 }
-
-
-
 
 bool Environment::assign(const std::string& name, const std::string& type, const std::string& value) {
     auto it = table.find(name);
@@ -32,16 +29,14 @@ bool Environment::assign(const std::string& name, const std::string& type, const
         if (!sym.isMutable)
             throw std::runtime_error("Cannot assign to immutable variable '" + name + "'");
 
-        // Allow type change if dynamic
         if (!sym.isDynamic) {
     if (sym.isNullable) {
-        // allow null assignment
+
         if (type == "null") {
             sym.value = value;
             return true;
         }
 
-        // allow base type assignment (e.g., int fits into int?)
         std::string baseType = sym.type;
         if (!baseType.empty() && baseType.back() == '?')
             baseType.pop_back();
@@ -56,8 +51,7 @@ bool Environment::assign(const std::string& name, const std::string& type, const
     }
 }
 
-
-        sym.type = type;   // <-- update type if dynamic
+        sym.type = type;  
         sym.value = value;
         return true;
     }
@@ -65,8 +59,6 @@ bool Environment::assign(const std::string& name, const std::string& type, const
         return parent->assign(name, type, value);
     throw std::runtime_error("Variable '" + name + "' not defined");
 }
-
-
 
 std::optional<Symbol> Environment::lookup(const std::string& name) const {
     auto it = table.find(name);
@@ -78,4 +70,3 @@ std::optional<Symbol> Environment::lookup(const std::string& name) const {
     }
     return std::nullopt;
 }
-

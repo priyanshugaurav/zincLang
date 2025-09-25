@@ -8,7 +8,7 @@ const Token &Parser::peekNext() const
 {
     if (current + 1 < tokens.size())
         return tokens[current + 1];
-    return tokens.back(); // safe fallback
+    return tokens.back(); 
 }
 
 std::vector<StmtPtr> Parser::parseProgram()
@@ -32,9 +32,6 @@ StmtPtr Parser::parse()
     return std::make_shared<BlockStmt>(stmts);
 }
 
-// -------------------
-// Helpers
-// -------------------
 const Token &Parser::peek() const { return tokens[current]; }
 const Token &Parser::previous() const { return tokens[current - 1]; }
 bool Parser::isAtEnd() const { return peek().type == TokenType::Eof; }
@@ -76,9 +73,6 @@ void Parser::consume(TokenType type, const std::string &msg)
     throw std::runtime_error("Parse error at line " + std::to_string(peek().line) + ": " + msg);
 }
 
-// -------------------
-// Declarations
-// -------------------
 StmtPtr Parser::declaration()
 {
     try
@@ -98,21 +92,18 @@ StmtPtr Parser::declaration()
     }
 }
 
-// simple prototype
 std::string Parser::parseType()
 {
     consume(TokenType::Identifier, "Expected type name");
     std::string typeName = previous().value;
 
-    // Check for generic: e.g., array<...>
     if (match({TokenType::Less}))
     {
-        std::string innerType = parseType();  // recursively parse
+        std::string innerType = parseType();  
         consume(TokenType::Greater, "Expected '>' after generic type");
         typeName += "<" + innerType + ">";
     }
 
-    // Check for nullable type: e.g., float?
     while (match({TokenType::Question}))
     {
         typeName += "?";
@@ -120,7 +111,6 @@ std::string Parser::parseType()
 
     return typeName;
 }
-
 
 StmtPtr Parser::varDeclaration()
 {
@@ -140,7 +130,6 @@ StmtPtr Parser::varDeclaration()
         initializer = expression();
     }
 
-    // optional semicolon
     if (check(TokenType::Semicolon))
         advance();
 
@@ -161,7 +150,6 @@ StmtPtr Parser::functionDeclaration()
             Token paramName = peek();
             consume(TokenType::Identifier, "Expected parameter name.");
 
-            // make ':' optional: if provided, parse the type, otherwise leave empty (dynamic)
             std::string paramType;
             if (match({TokenType::Colon}))
             {
@@ -169,7 +157,7 @@ StmtPtr Parser::functionDeclaration()
             }
             else
             {
-                paramType = ""; // empty string => dynamic / any (handled by TypeChecker)
+                paramType = ""; 
             }
 
             params.emplace_back(paramName.value, paramType);
@@ -179,7 +167,6 @@ StmtPtr Parser::functionDeclaration()
 
     consume(TokenType::RParen, "Expected ')' after parameters.");
 
-    // parse optional return type using parseType() to support generics/nullability
     std::string returnType;
     if (match({TokenType::Colon}))
     {
@@ -190,10 +177,6 @@ StmtPtr Parser::functionDeclaration()
     return std::make_shared<FuncDecl>(name.value, params, body, returnType);
 }
 
-
-
-// Statements
-// -------------------
 StmtPtr Parser::statement()
 {
     if (match({TokenType::If}))
@@ -213,7 +196,6 @@ StmtPtr Parser::statement()
     return expressionStatement();
 }
 
-// Add this method between logicalAnd() and equality()
 ExprPtr Parser::bitwiseOr()
 {
     ExprPtr expr = bitwiseXor();
@@ -262,21 +244,19 @@ ExprPtr Parser::shift()
     return expr;
 }
 
-
 StmtPtr Parser::ifStatement()
 {
-    // No need to consume 'if' here because it's already matched in `statement()`
 
-    ExprPtr condition = expression(); // parse condition
+    ExprPtr condition = expression(); 
 
     StmtPtr thenBranch = nullptr;
     if (check(TokenType::LBrace))
     {
-        thenBranch = blockStatement(); // parse { ... } block
+        thenBranch = blockStatement(); 
     }
     else
     {
-        thenBranch = statement(); // single statement
+        thenBranch = statement(); 
     }
 
     StmtPtr elseBranch = nullptr;
@@ -284,29 +264,27 @@ StmtPtr Parser::ifStatement()
     {
         if (match({TokenType::If}))
         {
-            elseBranch = ifStatement(); // recursion
+            elseBranch = ifStatement(); 
         }
         else if (check(TokenType::LBrace))
         {
-            elseBranch = blockStatement(); // else { ... }
+            elseBranch = blockStatement(); 
         }
         else
         {
-            elseBranch = statement(); // else single stmt
+            elseBranch = statement(); 
         }
     }
 
     return std::make_shared<IfStmt>(condition, thenBranch, elseBranch);
 }
 
-// Standard block: consumes '{'
 StmtPtr Parser::blockStatement()
 {
     consume(TokenType::LBrace, "Expected '{' to start block");
     return finishBlock();
 }
 
-// Variant: called when '{' was already consumed in statement()
 StmtPtr Parser::blockStatementAlreadyConsumed()
 {
     return finishBlock();
@@ -364,7 +342,7 @@ ExprPtr Parser::ifExpression()
 
 StmtPtr Parser::whileStatement()
 {
-    // 'while' already matched in statement()
+
     ExprPtr cond = expression();
     StmtPtr body = blockStatement();
     return std::make_shared<WhileStmt>(cond, body);
@@ -372,7 +350,7 @@ StmtPtr Parser::whileStatement()
 
 StmtPtr Parser::forStatement()
 {
-    // 'for' already matched in statement()
+
     Token iter = peek();
     consume(TokenType::Identifier, "Expected iterator variable.");
     consume(TokenType::In, "Expected 'in' keyword.");
@@ -387,13 +365,13 @@ StmtPtr Parser::timesStatement()
 
     if (match({TokenType::LParen}))
     {
-        // form: times(expr) { ... }
+
         count = expression();
         consume(TokenType::RParen, "Expected ')' after times count");
     }
     else
     {
-        // form: times expr { ... }
+
         count = expression();
     }
 
@@ -424,7 +402,6 @@ ExprPtr Parser::blockExpression()
 
     consume(TokenType::RBrace, "Expected '}' after block");
 
-    // last statement must be expression
     if (statements.empty())
         throw std::runtime_error("Block must not be empty");
 
@@ -436,7 +413,6 @@ ExprPtr Parser::blockExpression()
         if (varDecl->initializer)
             return varDecl->initializer;
 
-    // Wrap entire block as an "anonymous block expression" if needed
     std::vector<ExprPtr> exprs;
     for (auto &stmt : statements)
     {
@@ -444,7 +420,7 @@ ExprPtr Parser::blockExpression()
             exprs.push_back(eStmt->expr);
     }
     if (!exprs.empty())
-        return exprs.back(); // take last expression
+        return exprs.back(); 
 
     throw std::runtime_error("Block must end with an expression");
 }
@@ -468,13 +444,10 @@ StmtPtr Parser::expressionStatement()
     return std::make_shared<ExprStmt>(expr);
 }
 
-// -------------------
-// Expressions
-// -------------------
 ExprPtr Parser::expression()
 {
     if (check(TokenType::If))
-        return ifExpression(); // consumes 'if' inside ifExpression
+        return ifExpression(); 
     return assignment();
 }
 
@@ -486,13 +459,13 @@ ExprPtr Parser::assignment()
     {
         if (auto id = std::dynamic_pointer_cast<IdentifierExpr>(expr))
         {
-            ExprPtr value = expression(); // use expression() here to allow if-expr
+            ExprPtr value = expression(); 
             return std::make_shared<BinaryExpr>(expr, "=", value);
         }
 
         if (auto idx = std::dynamic_pointer_cast<IndexExpr>(expr))
         {
-            ExprPtr value = expression(); // same here
+            ExprPtr value = expression(); 
             return std::make_shared<ArrayAssignExpr>(idx->array, idx->index, value);
         }
 
@@ -516,11 +489,11 @@ ExprPtr Parser::logicalOr()
 
 ExprPtr Parser::logicalAnd()
 {
-    ExprPtr expr = bitwiseOr();  // Change from equality() to bitwiseOr()
+    ExprPtr expr = bitwiseOr();  
     while (match({TokenType::AndAnd}))
     {
         Token op = previous();
-        ExprPtr right = bitwiseOr();  // Change from equality() to bitwiseOr()
+        ExprPtr right = bitwiseOr();  
         expr = std::make_shared<BinaryExpr>(expr, op.value, right);
     }
     return expr;
@@ -642,7 +615,7 @@ ExprPtr Parser::primary()
     if (match({TokenType::True, TokenType::False}))
         return std::make_shared<LiteralExpr>(previous().value, "bool");
 
-    if (match({TokenType::Null})) // ✅ Add this
+    if (match({TokenType::Null})) 
         return std::make_shared<LiteralExpr>("null", "null");
 
     if (match({TokenType::Identifier}))
@@ -675,9 +648,6 @@ ExprPtr Parser::arrayLiteral()
     return std::make_shared<ArrayExpr>(elems);
 }
 
-// -------------------
-// Error recovery
-// -------------------
 void Parser::synchronize()
 {
     advance();

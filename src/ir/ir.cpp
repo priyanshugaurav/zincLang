@@ -3,14 +3,10 @@
 #include <cassert>
 #include "../ast/ast.h"
 
-// ---------- Helpers ----------
-
-// Map Zinc types to LLVM types
 llvm::Type* Codegen::toLLVMType(const std::string& ty) {
     std::string baseType = ty;
     bool isNullable = false;
 
-    // Handle nullable suffix '?'
     if (!ty.empty() && ty.back() == '?') {
         baseType = ty.substr(0, ty.size() - 1);
         isNullable = true;
@@ -27,7 +23,6 @@ llvm::Type* Codegen::toLLVMType(const std::string& ty) {
         return llvm::Type::getVoidTy(context);
     }
 
-    // Wrap nullable types in struct { i1 is_null, T value }
     if (isNullable) {
         llvm::Type* nullFlagTy = llvm::Type::getInt1Ty(context);
         return llvm::StructType::get(context, {nullFlagTy, llvmTy});
@@ -36,7 +31,6 @@ llvm::Type* Codegen::toLLVMType(const std::string& ty) {
     return llvmTy;
 }
 
-// Safe cast helper
 llvm::Value* Codegen::castValue(llvm::Value* val, llvm::Type* targetTy) {
     if (!val) return nullptr;
     llvm::Type* srcTy = val->getType();
@@ -56,16 +50,12 @@ llvm::Value* Codegen::castValue(llvm::Value* val, llvm::Type* targetTy) {
     return val;
 }
 
-// Create alloca in entry block
 llvm::AllocaInst* Codegen::createEntryBlockAlloca(llvm::Function* func, const std::string& name, llvm::Type* type) {
     if (!func) return nullptr;
     llvm::IRBuilder<> tmpB(&func->getEntryBlock(), func->getEntryBlock().begin());
     return tmpB.CreateAlloca(type, nullptr, name);
 }
 
-// ---------- Store helpers ----------
-
-// Store into nullable struct safely
 llvm::Value* Codegen::storeNullable(llvm::AllocaInst* alloca, llvm::Value* val, bool isNull) {
     if (!alloca || !val) return nullptr;
 
@@ -79,7 +69,6 @@ llvm::Value* Codegen::storeNullable(llvm::AllocaInst* alloca, llvm::Value* val, 
     return val;
 }
 
-// Store dynamic safely
 llvm::Value* Codegen::storeDynamicVar(const std::string& name, llvm::Value* val, ValueType type) {
     if (!val) return nullptr;
 
@@ -87,11 +76,11 @@ llvm::Value* Codegen::storeDynamicVar(const std::string& name, llvm::Value* val,
         llvm::Type* dynTy = llvm::StructType::get(
             context,
             {
-                llvm::Type::getInt8Ty(context),     // type tag
-                llvm::Type::getInt32Ty(context),    // int
-                llvm::Type::getDoubleTy(context),   // float
-                llvm::Type::getInt1Ty(context),     // bool
-                llvm::PointerType::getUnqual(llvm::Type::getInt8Ty(context)) // string
+                llvm::Type::getInt8Ty(context),     
+                llvm::Type::getInt32Ty(context),    
+                llvm::Type::getDoubleTy(context),   
+                llvm::Type::getInt1Ty(context),     
+                llvm::PointerType::getUnqual(llvm::Type::getInt8Ty(context)) 
             }
         );
         llvm::AllocaInst* alloca = createEntryBlockAlloca(builder.GetInsertBlock()->getParent(), name, dynTy);
@@ -101,16 +90,12 @@ llvm::Value* Codegen::storeDynamicVar(const std::string& name, llvm::Value* val,
     llvm::AllocaInst* ptr = namedValues[name];
     if (!ptr) return nullptr;
 
-    // TODO: Store value in correct field based on type tag
     return val;
 }
-
-// ---------- Expression codegen ----------
 
 llvm::Value* Codegen::codegenExpr(const ExprPtr& expr) {
     if (!expr) return nullptr;
 
-    // Literal
     if (auto lit = std::dynamic_pointer_cast<LiteralExpr>(expr)) {
         if (lit->type == "int") return llvm::ConstantInt::get(context, llvm::APInt(32, std::stoi(lit->value)));
         if (lit->type == "float") return llvm::ConstantFP::get(context, llvm::APFloat(std::stod(lit->value)));
@@ -120,7 +105,6 @@ llvm::Value* Codegen::codegenExpr(const ExprPtr& expr) {
         return nullptr;
     }
 
-    // Identifier
     if (auto id = std::dynamic_pointer_cast<IdentifierExpr>(expr)) {
     if (!namedValues.count(id->name)) return nullptr;
     llvm::AllocaInst* ptr = namedValues[id->name];
@@ -128,9 +112,9 @@ llvm::Value* Codegen::codegenExpr(const ExprPtr& expr) {
 
     if (auto structTy = llvm::dyn_cast<llvm::StructType>(type)) {
         if (structTy->getNumContainedTypes() == 2) {
-            // nullable load
+
             llvm::Value* valPtr = builder.CreateStructGEP(structTy, ptr, 1);
-            llvm::Type* valType = structTy->getElementType(1); // Correct type for load
+            llvm::Type* valType = structTy->getElementType(1); 
             return builder.CreateLoad(valType, valPtr, id->name);
         }
     }
@@ -138,8 +122,6 @@ llvm::Value* Codegen::codegenExpr(const ExprPtr& expr) {
     return builder.CreateLoad(type, ptr, id->name);
 }
 
-
-    // Binary expression
     if (auto bin = std::dynamic_pointer_cast<BinaryExpr>(expr)) {
         if (bin->op == "=") {
             auto id = std::dynamic_pointer_cast<IdentifierExpr>(bin->lhs);
@@ -178,12 +160,9 @@ llvm::Value* Codegen::codegenExpr(const ExprPtr& expr) {
     return nullptr;
 }
 
-// ---------- Statement codegen ----------
-
 void Codegen::codegenStmt(const StmtPtr& stmt) {
     if (!stmt) return;
 
-    // Variable declaration
     if (auto vd = std::dynamic_pointer_cast<VarDecl>(stmt)) {
         llvm::Type* varTy = toLLVMType(vd->typeHint.empty() ? "int" : vd->typeHint);
         llvm::AllocaInst* alloca = createEntryBlockAlloca(builder.GetInsertBlock()->getParent(), vd->name, varTy);
@@ -209,13 +188,11 @@ void Codegen::codegenStmt(const StmtPtr& stmt) {
         return;
     }
 
-    // Expression statement
     if (auto es = std::dynamic_pointer_cast<ExprStmt>(stmt)) {
         codegenExpr(es->expr);
         return;
     }
 
-    // Return statement
     if (auto rs = std::dynamic_pointer_cast<ReturnStmt>(stmt)) {
         llvm::Value* val = rs->value ? codegenExpr(rs->value)
                                      : llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0);
@@ -223,13 +200,11 @@ void Codegen::codegenStmt(const StmtPtr& stmt) {
         return;
     }
 
-    // Block statement
     if (auto block = std::dynamic_pointer_cast<BlockStmt>(stmt)) {
         for (auto& s : block->statements) codegenStmt(s);
         return;
     }
 
-    // Function declaration
     if (auto fn = std::dynamic_pointer_cast<FuncDecl>(stmt)) {
         llvm::Type* retTy = llvm::Type::getInt32Ty(context);
         auto* funcType = llvm::FunctionType::get(retTy, false);
@@ -239,9 +214,6 @@ void Codegen::codegenStmt(const StmtPtr& stmt) {
         builder.SetInsertPoint(entry);
 
         codegenStmt(fn->body);
-
-    //     if (!builder.GetInsertBlock()->getTerminator())
-    // builder.CreateRet(llvm::ConstantInt::get(retTy, 0));
 
     }
 }

@@ -12,10 +12,6 @@
 #include <cstdlib> 
 #include "codegen/codegen.h"
 
-
-// ---------------------------
-// Utilities
-// ---------------------------
 std::string readFile(const std::string &path)
 {
     std::ifstream file(path);
@@ -142,9 +138,6 @@ std::string tokenTypeToString(TokenType t)
     return "???";
 }
 
-// ---------------------------
-// Print AST
-// ---------------------------
 void printAST(const ExprPtr &expr, int indent = 0);
 void printAST(const StmtPtr &stmt, int indent = 0);
 
@@ -301,9 +294,6 @@ void printAST(const StmtPtr &stmt, int indent)
     }
 }
 
-// ---------------------------
-// Main
-// ---------------------------
 int main(int argc, char *argv[])
 {
     if (argc < 2)
@@ -317,7 +307,6 @@ int main(int argc, char *argv[])
         std::string source = readFile(argv[1]);
         auto tokens = lexString(source);
 
-        // Print tokens
         for (auto &tok : tokens)
         {
             std::cout << tokenTypeToString(tok.type)
@@ -326,10 +315,9 @@ int main(int argc, char *argv[])
                       << "\n";
         }
 
-        // Parse
         Parser parser(tokens);
-        // auto stmts = parser.parseProgram(); // vector<StmtPtr>
-        StmtPtr ast = parser.parse(); // already returns a BlockStmt
+
+        StmtPtr ast = parser.parse(); 
 
         std::cout << "\n===== AST =====\n";
         printAST(ast);
@@ -349,48 +337,10 @@ int main(int argc, char *argv[])
             return 1;
         }
 
-        // std::cout << "\n===== LLVM IR =====\n";
-
-        // // Create a Codegen instance
-        // Codegen cg("ZincModule");
-
-        // // Define a main function
-        // llvm::FunctionType *mainTy =
-        //     llvm::FunctionType::get(llvm::Type::getInt32Ty(cg.context), false);
-        // llvm::Function *mainFunc =
-        //     llvm::Function::Create(mainTy, llvm::Function::ExternalLinkage, "main", cg.getModule());
-
-        // llvm::BasicBlock *entry = llvm::BasicBlock::Create(cg.context, "entry", mainFunc);
-        // cg.builder.SetInsertPoint(entry);
-
-        // // Lower the AST into LLVM IR
-        // cg.codegenStmt(ast);
-
-        // // Ensure function ends with return
-        // if (!entry->getTerminator())
-        // {
-        //     cg.builder.CreateRet(llvm::ConstantInt::get(cg.context, llvm::APInt(32, 0)));
-        // }
-
-        // // Verify function
-        // llvm::verifyFunction(*mainFunc);
-
-        // // Print IR to console
-        // cg.getModule()->print(llvm::outs(), nullptr);
-
-        // // Also save to file
-        // std::error_code EC;
-        // llvm::raw_fd_ostream dest("output.ll", EC);
-        // cg.getModule()->print(dest, nullptr);
-        // std::cout << "\n✅ LLVM IR written to output.ll\n";
         std::cout << "\n===== NASM Codegen =====\n";
         nasm::Codegen cg("output.asm");
         cg.generate(ast);
         std::cout << "✅ Assembly written to output.asm\n";
-        // std::system("nasm -f elf64 output.asm");
-        // std::system("ld output.o");
-        // std::system("./a.out");
-        
 
     }
     catch (const std::exception &ex)

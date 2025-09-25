@@ -7,7 +7,6 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Verifier.h>
 
-// Include AST for ExprPtr & StmtPtr
 #include "../ast/ast.h"
 
 enum class ValueType {
@@ -25,14 +24,12 @@ public:
     std::unique_ptr<llvm::Module> module;
     llvm::IRBuilder<> builder;
 
-    // Symbol table: variable name → alloca
     std::map<std::string, llvm::AllocaInst*> namedValues;
 
     Codegen(const std::string& moduleName)
         : module(std::make_unique<llvm::Module>(moduleName, context)),
           builder(context) {}
 
-    // Main API
     llvm::Value* codegenExpr(const ExprPtr& expr);
     void codegenStmt(const StmtPtr& stmt);
     llvm::Module* getModule() { return module.get(); }
@@ -41,11 +38,10 @@ public:
     llvm::Value* storeDynamicVar(const std::string& name, llvm::Value* val, ValueType type);
 
 private:
-    // Helpers
+
     llvm::Type* toLLVMType(const std::string& ty);
     llvm::Value* castValue(llvm::Value* val, llvm::Type* targetTy);
     llvm::AllocaInst* createEntryBlockAlloca(llvm::Function* func, const std::string& name, llvm::Type* type);
 
-    // Dynamic variable helper
     llvm::Value* storeDynamic(const std::string& name, llvm::Value* val, ValueType type);
 };

@@ -14,18 +14,18 @@ namespace nasm
     {
         std::ofstream out;
         int labelCounter = 0;
-        int stackOffset = 0; // negative offsets from rbp (e.g. -8, -16)
+        int stackOffset = 0; 
         std::unordered_map<std::string, int> varTable;
         std::vector<std::string> dataSection;
         std::vector<std::shared_ptr<FuncDecl>> deferredFunctions;
-        std::vector<std::unordered_map<std::string, std::string>> scopeStack; // for nested variable scopes
+        std::vector<std::unordered_map<std::string, std::string>> scopeStack; 
         int scopeLevel = 0;
 
-        static constexpr int64_t NULL_VALUE = 0x8000000000000000LL; // Use sign bit as null marker
+        static constexpr int64_t NULL_VALUE = 0x8000000000000000LL; 
 
-        std::unordered_map<std::string, std::shared_ptr<TypeInfo>> varTypeInfo; // Enhanced type info
-        std::unordered_map<std::string, int> arrayDimensions;                   // Track array dimensions
-        std::unordered_map<std::string, std::vector<int>> arrayBounds;          // Static array bounds
+        std::unordered_map<std::string, std::shared_ptr<TypeInfo>> varTypeInfo; 
+        std::unordered_map<std::string, int> arrayDimensions;                   
+        std::unordered_map<std::string, std::vector<int>> arrayBounds;          
 
         std::unordered_map<std::string, std::vector<std::string>> arrayElementTypes;
         bool errorHandlersEmitted = false;
@@ -50,7 +50,7 @@ namespace nasm
             {
                 return it->second[index];
             }
-            return "int"; // default
+            return "int"; 
         }
 
         std::string newLabel(const std::string &prefix)
@@ -58,22 +58,20 @@ namespace nasm
             return prefix + std::to_string(labelCounter++);
         }
 
-        // Helper method to detect string comparisons
         bool isStringComparison(const ExprPtr &lhs, const ExprPtr &rhs)
         {
-            // Check if both operands are strings
+
             std::string leftType = getExprType(lhs);
             std::string rightType = getExprType(rhs);
 
             return (leftType == "string" && rightType == "string");
         }
 
-        // Return a memory operand like: qword [rbp-8]
         std::string slot(int off)
         {
             std::string s = "rbp";
             if (off < 0)
-                s += std::to_string(off); // rbp-8
+                s += std::to_string(off); 
             else if (off > 0)
                 s += "+" + std::to_string(off);
             return "qword [" + s + "]";
@@ -93,7 +91,7 @@ namespace nasm
             {
                 for (auto &s : block->statements)
                 {
-                    // Skip nested function declarations - they're already deferred
+
                     if (std::dynamic_pointer_cast<FuncDecl>(s))
                         continue;
                     genStmt(s);
@@ -101,17 +99,16 @@ namespace nasm
             }
             else if (auto f = std::dynamic_pointer_cast<FuncDecl>(stmt))
             {
-                // Skip - this should have been deferred
+
                 return;
             }
             else
             {
-                // For all other statement types, use normal genStmt
+
                 genStmt(stmt);
             }
         }
 
-        // Escape double quotes and backslashes for db "..." emission
         static std::string escapeString(const std::string &in)
         {
             std::string out;
@@ -140,12 +137,12 @@ namespace nasm
 
             emit("array_bounds_error:");
             emit("    mov rax, 1");
-            emit("    mov rdi, 2"); // stderr
+            emit("    mov rdi, 2"); 
             emit("    lea rsi, [rel array_bounds_msg]");
             emit("    mov rdx, 26");
             emit("    syscall");
-            emit("    mov rdi, 1");  // exit code 1
-            emit("    mov rax, 60"); // sys_exit
+            emit("    mov rdi, 1");  
+            emit("    mov rax, 60"); 
             emit("    syscall");
 
             emit("null_deref_error:");
@@ -163,11 +160,9 @@ namespace nasm
         {
             std::string okLabel = newLabel("bounds_ok");
 
-            // Check if index >= 0
             emit("    cmp " + indexReg + ", 0");
             emit("    jl array_bounds_error");
 
-            // Check if index < array_length (stored at array[0])
             emit("    cmp " + indexReg + ", qword [" + arrayReg + "]");
             emit("    jge array_bounds_error");
             emit("    jmp " + okLabel);
@@ -177,21 +172,20 @@ namespace nasm
 
         void emitArrayAllocation(int size, const std::string &elemType)
         {
-            // Allocate memory: 8 bytes for length + size * 8 bytes for elements
+
             int totalBytes = 8 + (size * 8);
 
-            emit("    mov rax, 9");                             // sys_mmap
-            emit("    mov rdi, 0");                             // addr
-            emit("    mov rsi, " + std::to_string(totalBytes)); // length
-            emit("    mov rdx, 3");                             // PROT_READ | PROT_WRITE
-            emit("    mov r10, 34");                            // MAP_PRIVATE | MAP_ANONYMOUS
-            emit("    mov r8, -1");                             // fd
-            emit("    mov r9, 0");                              // offset
+            emit("    mov rax, 9");                             
+            emit("    mov rdi, 0");                             
+            emit("    mov rsi, " + std::to_string(totalBytes)); 
+            emit("    mov rdx, 3");                             
+            emit("    mov r10, 34");                            
+            emit("    mov r8, -1");                             
+            emit("    mov r9, 0");                              
             emit("    syscall");
 
-            // Store array length at offset 0
             emit("    mov qword [rax], " + std::to_string(size));
-            // rax now contains pointer to allocated array
+
         }
 
         void emitNullCheck(const std::string &reg)
@@ -202,7 +196,6 @@ namespace nasm
             emit("    cmp " + reg + ", rbx");
             emit("    jne " + okLabel);
 
-            // Null dereference error
             emit("    jmp null_deref_error");
 
             emit(okLabel + ":");
@@ -220,9 +213,9 @@ namespace nasm
             dataSection.push_back("half_const: dq 0.5");
             dataSection.push_back("true_str: db 'true', 0");
             dataSection.push_back("false_str: db 'false', 0");
-            // CHANGE 4: Add null string representation
+
             dataSection.push_back("null_str: db 'null', 0");
-            // Add to dataSection in constructor after existing entries:
+
             dataSection.push_back("open_bracket: db '[', 0");
             dataSection.push_back("close_bracket: db ']', 0");
             dataSection.push_back("comma_space: db ', ', 0");
@@ -234,7 +227,7 @@ namespace nasm
         {
             if (auto idx = std::dynamic_pointer_cast<IndexExpr>(arg))
             {
-                // Special handling for array indexing
+
                 genExpr(idx->array);
                 emitNullCheck("rax");
 
@@ -245,29 +238,26 @@ namespace nasm
 
                 emitArrayBoundsCheck("rax", "rbx");
 
-                // Get type and value
                 emit("    push rax");
                 emit("    push rbx");
-                emit("    mov rcx, qword [rax + 8]"); // type array
+                emit("    mov rcx, qword [rax + 8]"); 
                 emit("    imul rbx, 8");
                 emit("    add rcx, rbx");
-                emit("    mov rdx, qword [rcx]"); // type code
+                emit("    mov rdx, qword [rcx]"); 
                 emit("    pop rbx");
                 emit("    pop rax");
 
-                // Get value
                 emit("    imul rbx, 8");
                 emit("    add rbx, 16");
                 emit("    add rax, rbx");
                 emit("    mov rax, qword [rax]");
 
-                // Print based on type
                 std::string floatLbl = newLabel("print_float");
                 std::string stringLbl = newLabel("print_string");
                 std::string boolLbl = newLabel("print_bool");
                 std::string intLbl = newLabel("print_int");
-                std::string arrayLbl = newLabel("print_array"); // Add this
-                std::string nullLbl = newLabel("print_null");   // Add this
+                std::string arrayLbl = newLabel("print_array"); 
+                std::string nullLbl = newLabel("print_null");   
                 std::string doneLbl = newLabel("print_done");
 
                 emit("    cmp rdx, 0");
@@ -279,11 +269,11 @@ namespace nasm
                 emit("    cmp rdx, 3");
                 emit("    je " + boolLbl);
                 emit("    cmp rdx, 4");
-                emit("    je " + arrayLbl); // Handle nested arrays
-                emit("    jmp " + intLbl);  // default
+                emit("    je " + arrayLbl); 
+                emit("    jmp " + intLbl);  
 
                 emit(intLbl + ":");
-                // Check for null first
+
                 emit("    mov rbx, " + std::to_string(NULL_VALUE));
                 emit("    cmp rax, rbx");
                 emit("    je " + nullLbl);
@@ -291,7 +281,7 @@ namespace nasm
                 emit("    jmp " + doneLbl);
 
                 emit(floatLbl + ":");
-                // Check for null first
+
                 emit("    mov rbx, " + std::to_string(NULL_VALUE));
                 emit("    cmp rax, rbx");
                 emit("    je " + nullLbl);
@@ -300,11 +290,11 @@ namespace nasm
                 emit("    jmp " + doneLbl);
 
                 emit(stringLbl + ":");
-                // Check for null first
+
                 emit("    mov rbx, " + std::to_string(NULL_VALUE));
                 emit("    cmp rax, rbx");
                 emit("    je " + nullLbl);
-                emit("    mov rsi, rax"); // string pointer
+                emit("    mov rsi, rax"); 
                 std::string lenLbl = newLabel("strlen");
                 emit("    xor rcx, rcx");
                 emit(lenLbl + "_loop:");
@@ -320,24 +310,22 @@ namespace nasm
                 emit("    jmp " + doneLbl);
 
                 emit(boolLbl + ":");
-                // Check for null first
+
                 emit("    mov rbx, " + std::to_string(NULL_VALUE));
                 emit("    cmp rax, rbx");
                 emit("    je " + nullLbl);
                 emitPrintBool();
                 emit("    jmp " + doneLbl);
 
-                // Add handler for nested arrays
                 emit(arrayLbl + ":");
-                // Check for null first
+
                 emit("    mov rbx, " + std::to_string(NULL_VALUE));
                 emit("    cmp rax, rbx");
                 emit("    je " + nullLbl);
-                // Print nested array recursively
+
                 printNestedArray("rax", 0);
                 emit("    jmp " + doneLbl);
 
-                // Add handler for null values
                 emit(nullLbl + ":");
                 emitPrintNull();
 
@@ -345,50 +333,43 @@ namespace nasm
                 return;
             }
 
-            // Fallback to normal expression handling
             std::string argType = getExprType(arg);
             genExpr(arg);
             emitPrintValue(argType);
         }
 
-        // Replace your existing IndexExpr handling in genExpr with this:
         void handleIndexExpr(const std::shared_ptr<IndexExpr> &idx)
         {
-            genExpr(idx->array); // Array pointer in rax
+            genExpr(idx->array); 
 
-            // Check for null array
             emitNullCheck("rax");
 
-            emit("    push rax");     // Save array pointer
-            genExpr(idx->index);      // Index in rax
-            emit("    mov rbx, rax"); // Index in rbx
-            emit("    pop rax");      // Array pointer back in rax
+            emit("    push rax");     
+            genExpr(idx->index);      
+            emit("    mov rbx, rax"); 
+            emit("    pop rax");      
 
-            // Bounds check
             emitArrayBoundsCheck("rax", "rbx");
 
-            // Get type information
-            emit("    push rax");                 // Save array pointer
-            emit("    push rbx");                 // Save index
-            emit("    mov rcx, qword [rax + 8]"); // Load type array pointer
-            emit("    imul rbx, 8");              // Index * 8 for type lookup
+            emit("    push rax");                 
+            emit("    push rbx");                 
+            emit("    mov rcx, qword [rax + 8]"); 
+            emit("    imul rbx, 8");              
             emit("    add rcx, rbx");
-            emit("    mov rdx, qword [rcx]"); // Load type code
-            emit("    pop rbx");              // Restore index
-            emit("    pop rax");              // Restore array pointer
+            emit("    mov rdx, qword [rcx]"); 
+            emit("    pop rbx");              
+            emit("    pop rax");              
 
-            // Calculate element offset: 16 + (index * 8)
             emit("    imul rbx, 8");
-            emit("    add rbx, 16"); // Skip length and type pointer
+            emit("    add rbx, 16"); 
             emit("    add rax, rbx");
-            emit("    mov rax, qword [rax]"); // Load element value
+            emit("    mov rax, qword [rax]"); 
 
-            // Store type information for later use in printing
-            emit("    push rdx"); // Push type code onto stack for caller to use
+            emit("    push rdx"); 
         }
 
         void emit(const std::string &s) { out << s << "\n"; }
-        std::unordered_map<std::string, std::string> varTypes; // "string", "int", etc.
+        std::unordered_map<std::string, std::string> varTypes; 
 
         std::string getExprType(const ExprPtr &expr)
         {
@@ -403,7 +384,7 @@ namespace nasm
                 {
                     return it->second->toString();
                 }
-                // Fallback to old system
+
                 auto fallback = varTypes.find(id->name);
                 if (fallback != varTypes.end())
                 {
@@ -411,7 +392,7 @@ namespace nasm
                 }
                 return "int";
             }
-            
+
             else if (auto arr = std::dynamic_pointer_cast<ArrayExpr>(expr))
             {
                 if (arr->elements.empty())
@@ -433,19 +414,17 @@ namespace nasm
             }
             else if (auto idx = std::dynamic_pointer_cast<IndexExpr>(expr))
             {
-                // Get the array type
+
                 std::string arrayType = getExprType(idx->array);
 
-                // Parse array type to extract element type
                 if (arrayType.find("array<") == 0 && arrayType.back() == '>')
                 {
-                    // Extract element type from array<element_type>
-                    size_t start = 6;                    // after "array<"
-                    size_t end = arrayType.length() - 1; // before ">"
+
+                    size_t start = 6;                    
+                    size_t end = arrayType.length() - 1; 
                     return arrayType.substr(start, end - start);
                 }
 
-                // For dynamic arrays or unknown types, try to infer from the array variable
                 if (auto arrayId = std::dynamic_pointer_cast<IdentifierExpr>(idx->array))
                 {
                     auto typeIt = varTypeInfo.find(arrayId->name);
@@ -454,11 +433,10 @@ namespace nasm
                         return typeIt->second->elementType->baseType;
                     }
 
-                    // Fallback: check if we stored element types during array creation
                     auto elemIt = arrayElementTypes.find(arrayId->name);
                     if (elemIt != arrayElementTypes.end() && !elemIt->second.empty())
                     {
-                        // Try to get the type of the specific index if it's a constant
+
                         if (auto indexLit = std::dynamic_pointer_cast<LiteralExpr>(idx->index))
                         {
                             int indexVal = std::stoi(indexLit->value);
@@ -467,13 +445,12 @@ namespace nasm
                                 return elemIt->second[indexVal];
                             }
                         }
-                        // Return the type of the first element as a best guess
+
                         return elemIt->second[0];
                     }
                 }
-                
 
-                return "int"; // default fallback
+                return "int"; 
             }
             else if (auto bin = std::dynamic_pointer_cast<BinaryExpr>(expr))
             {
@@ -539,12 +516,11 @@ namespace nasm
                 emit("    cmp rax, rbx");
                 emit("    jne " + notNullLbl);
 
-                // Print null
                 emitPrintNull();
                 emit("    jmp " + doneLbl);
 
                 emit(notNullLbl + ":");
-                // Print the actual value
+
                 if (varType == "float")
                 {
                     emit("    movq xmm0, rax");
@@ -586,7 +562,6 @@ namespace nasm
             emit("    cmp rax, 0");
             emit("    je " + lbl + "_false");
 
-            // Print "true"
             emit("    mov rax, 1");
             emit("    mov rdi, 1");
             emit("    lea rsi, [rel true_str]");
@@ -595,7 +570,7 @@ namespace nasm
             emit("    jmp " + lbl + "_done");
 
             emit(lbl + "_false:");
-            // Print "false"
+
             emit("    mov rax, 1");
             emit("    mov rdi, 1");
             emit("    lea rsi, [rel false_str]");
@@ -607,7 +582,7 @@ namespace nasm
 
         void emitPrintDouble()
         {
-            // Generate all labels at once to avoid contamination
+
             std::string baseLbl = newLabel("dbl");
             std::string positiveLbl = baseLbl + "_positive";
             std::string fracOkLbl = baseLbl + "_frac_ok";
@@ -621,54 +596,47 @@ namespace nasm
             emit("    push r13");
             emit("    push r14");
             emit("    sub rsp, 16");
-            emit("    movsd [rsp], xmm0"); // save original double
+            emit("    movsd [rsp], xmm0"); 
 
-            // Handle negative numbers
-            emit("    xorpd xmm2, xmm2"); // zero
+            emit("    xorpd xmm2, xmm2"); 
             emit("    comisd xmm0, xmm2");
             emit("    jae " + positiveLbl);
 
-            // Print minus sign and make positive
             emit("    mov rax, 1");
             emit("    mov rdi, 1");
             emit("    lea rsi, [rel minus_char]");
             emit("    mov rdx, 1");
             emit("    syscall");
             emit("    movsd xmm0, [rsp]");
-            emit("    mov rax, 0x8000000000000000"); // sign bit mask
+            emit("    mov rax, 0x8000000000000000"); 
             emit("    movq xmm1, rax");
-            emit("    xorpd xmm0, xmm1"); // flip sign bit to make positive
+            emit("    xorpd xmm0, xmm1"); 
             emit("    movsd [rsp], xmm0");
 
             emit(positiveLbl + ":");
 
-            // Get integer part
             emit("    movsd xmm0, [rsp]");
             emit("    cvttsd2si rax, xmm0");
-            emit("    mov [rsp+8], rax"); // save integer part
+            emit("    mov [rsp+8], rax"); 
             emitPrintRax();
 
-            // Print decimal point
             emit("    mov rax, 1");
             emit("    mov rdi, 1");
             emit("    lea rsi, [rel dot_char]");
             emit("    mov rdx, 1");
             emit("    syscall");
 
-            // Calculate fractional part
-            emit("    movsd xmm0, [rsp]");  // original (positive) value
-            emit("    mov rax, [rsp+8]");   // integer part
-            emit("    cvtsi2sd xmm1, rax"); // convert int back to double
-            emit("    subsd xmm0, xmm1");   // frac = orig - int_as_double
+            emit("    movsd xmm0, [rsp]");  
+            emit("    mov rax, [rsp+8]");   
+            emit("    cvtsi2sd xmm1, rax"); 
+            emit("    subsd xmm0, xmm1");   
 
-            // Multiply by 1000000 for 6 decimal places and round
             emit("    mov rax, 1000000");
             emit("    cvtsi2sd xmm1, rax");
             emit("    mulsd xmm0, xmm1");
-            emit("    addsd xmm0, [rel half_const]"); // add 0.5 for rounding
+            emit("    addsd xmm0, [rel half_const]"); 
             emit("    cvttsd2si rax, xmm0");
 
-            // Clamp to valid range
             emit("    cmp rax, 1000000");
             emit("    jl " + fracOkLbl);
             emit("    mov rax, 999999");
@@ -679,34 +647,31 @@ namespace nasm
             emit("    mov rax, 0");
             emit(fracPositiveLbl + ":");
 
-            // Convert fractional part to string - build from right to left
-            emit("    mov rbx, rax");           // fractional part value
-            emit("    lea r14, [rel num_buf]"); // start of buffer
-            emit("    mov r13, r14");           // current position
-            emit("    add r13, 6");             // move to end of 6-digit space
-            emit("    mov byte [r13], 0");      // null terminate
+            emit("    mov rbx, rax");           
+            emit("    lea r14, [rel num_buf]"); 
+            emit("    mov r13, r14");           
+            emit("    add r13, 6");             
+            emit("    mov byte [r13], 0");      
 
-            // Convert 6 digits with leading zeros
-            emit("    mov rcx, 6"); // digit counter
+            emit("    mov rcx, 6"); 
 
             emit(digitLoopLbl + ":");
             emit("    xor rdx, rdx");
             emit("    mov rax, rbx");
             emit("    mov r8, 10");
-            emit("    div r8");      // rax = quotient, rdx = remainder
-            emit("    add dl, '0'"); // convert digit to ASCII
+            emit("    div r8");      
+            emit("    add dl, '0'"); 
             emit("    dec r13");
-            emit("    mov [r13], dl"); // store digit
-            emit("    mov rbx, rax");  // update value
+            emit("    mov [r13], dl"); 
+            emit("    mov rbx, rax");  
             emit("    loop " + digitLoopLbl);
 
-            // Remove trailing zeros
-            emit("    mov rsi, r14"); // start of digits
-            emit("    add rsi, 5");   // point to last digit
-            emit("    mov rcx, 6");   // max digits
+            emit("    mov rsi, r14"); 
+            emit("    add rsi, 5");   
+            emit("    mov rcx, 6");   
 
             emit(trimLoopLbl + ":");
-            emit("    cmp rcx, 1"); // keep at least 1 digit
+            emit("    cmp rcx, 1"); 
             emit("    jle " + trimDoneLbl);
             emit("    cmp byte [rsi], '0'");
             emit("    jne " + trimDoneLbl);
@@ -715,11 +680,11 @@ namespace nasm
             emit("    jmp " + trimLoopLbl);
 
             emit(trimDoneLbl + ":");
-            // Print the fractional digits
-            emit("    mov rax, 1");   // sys_write
-            emit("    mov rdi, 1");   // stdout
-            emit("    mov rsi, r14"); // buffer start
-            emit("    mov rdx, rcx"); // length
+
+            emit("    mov rax, 1");   
+            emit("    mov rdi, 1");   
+            emit("    mov rsi, r14"); 
+            emit("    mov rdx, rcx"); 
             emit("    syscall");
 
             emit("    add rsp, 16");
@@ -728,27 +693,16 @@ namespace nasm
             emit("    pop r12");
             emit("    pop rbx");
         }
-        // Add this to your constructor's dataSection initialization:
-        // dataSection.push_back("half_const: dq 0.5"); // for rounding
-        // Add this to your constructor's dataSection initialization:
-        // dataSection.push_back("half_const: dq 0.5"); // for rounding
 
-        // Add this to your constructor's dataSection initialization:
-        // dataSection.push_back("half_const: dq 0.5"); // for rounding
-
-        // A robust convert-and-print routine that preserves callee-saved registers
-        // and computes the printed length correctly. It assumes the integer to print is in RAX.
         void emitPrintRax()
         {
             std::string baseLbl = newLabel("conv");
             std::string positiveLbl = baseLbl + "_positive";
             std::string loopLbl = baseLbl + "_loop";
 
-            // check for negative
             emit("    cmp rax, 0");
             emit("    jge " + positiveLbl);
 
-            // save value, print '-', restore, then negate
             emit("    push rax");
             emit("    mov rax, 1");
             emit("    mov rdi, 1");
@@ -760,34 +714,31 @@ namespace nasm
 
             emit(positiveLbl + ":");
 
-            // save registers
             emit("    push rbx");
             emit("    push r12");
             emit("    push r13");
 
             emit("    mov rbx, 10");
-            emit("    lea r12, [rel num_buf+31]"); // end of buffer
-            emit("    mov byte [r12], 0");         // null terminator
+            emit("    lea r12, [rel num_buf+31]"); 
+            emit("    mov byte [r12], 0");         
             emit("    mov r13, r12");
 
             emit(loopLbl + ":");
             emit("    xor rdx, rdx");
-            emit("    div rbx"); // unsigned fine (rax non-negative now)
+            emit("    div rbx"); 
             emit("    add dl, '0'");
             emit("    dec r13");
             emit("    mov [r13], dl");
             emit("    test rax, rax");
             emit("    jnz " + loopLbl);
 
-            // write string
             emit("    mov rax, 1");
             emit("    mov rdi, 1");
             emit("    mov rsi, r13");
             emit("    lea rdx, [rel num_buf+31]");
-            emit("    sub rdx, r13"); // length
+            emit("    sub rdx, r13"); 
             emit("    syscall");
 
-            // restore registers
             emit("    pop r13");
             emit("    pop r12");
             emit("    pop rbx");
@@ -799,31 +750,27 @@ namespace nasm
 
             if (size == 0)
             {
-                // Empty array
+
                 emit("    mov rax, " + std::to_string(NULL_VALUE));
                 return;
             }
 
-            // Allocate array with type information
-            // Array layout: [length][type_info_ptr][element1][element2]...
-            int totalBytes = 8 + 8 + (size * 8); // length + type_ptr + elements
+            int totalBytes = 8 + 8 + (size * 8); 
 
-            emit("    mov rax, 9");                             // sys_mmap
-            emit("    mov rdi, 0");                             // addr
-            emit("    mov rsi, " + std::to_string(totalBytes)); // length
-            emit("    mov rdx, 3");                             // PROT_READ | PROT_WRITE
-            emit("    mov r10, 34");                            // MAP_PRIVATE | MAP_ANONYMOUS
-            emit("    mov r8, -1");                             // fd
-            emit("    mov r9, 0");                              // offset
+            emit("    mov rax, 9");                             
+            emit("    mov rdi, 0");                             
+            emit("    mov rsi, " + std::to_string(totalBytes)); 
+            emit("    mov rdx, 3");                             
+            emit("    mov r10, 34");                            
+            emit("    mov r8, -1");                             
+            emit("    mov r9, 0");                              
             emit("    syscall");
 
-            // Store array length at offset 0
             emit("    mov qword [rax], " + std::to_string(size));
-            emit("    push rax"); // Save array pointer
+            emit("    push rax"); 
 
-            // Allocate type information array
-            int typeBytes = size * 8; // 8 bytes per type (we'll store type as integer)
-            emit("    mov rax, 9");   // sys_mmap for types
+            int typeBytes = size * 8; 
+            emit("    mov rax, 9");   
             emit("    mov rdi, 0");
             emit("    mov rsi, " + std::to_string(typeBytes));
             emit("    mov rdx, 3");
@@ -832,19 +779,17 @@ namespace nasm
             emit("    mov r9, 0");
             emit("    syscall");
 
-            emit("    mov rbx, [rsp]");           // Load array pointer
-            emit("    mov qword [rbx + 8], rax"); // Store type array pointer
+            emit("    mov rbx, [rsp]");           
+            emit("    mov qword [rbx + 8], rax"); 
 
-            emit("    push rax"); // Save type array pointer
+            emit("    push rax"); 
 
-            // Fill array elements and type information
             for (int i = 0; i < size; ++i)
             {
                 std::string elemType = getExprType(arr->elements[i]);
 
-                // Store type information (encode as integer)
-                emit("    mov rbx, [rsp]"); // type array pointer
-                int typeCode = 0;           // int (default)
+                emit("    mov rbx, [rsp]"); 
+                int typeCode = 0;           
                 if (elemType == "float")
                     typeCode = 1;
                 else if (elemType == "string")
@@ -852,36 +797,31 @@ namespace nasm
                 else if (elemType == "bool")
                     typeCode = 3;
                 else if (elemType.find("array") == 0)
-                    typeCode = 4; // nested array
-                // Note: null values will be stored as int type with NULL_VALUE
+                    typeCode = 4; 
 
                 emit("    mov qword [rbx + " + std::to_string(i * 8) + "], " + std::to_string(typeCode));
 
-                // Generate and store element
                 genExpr(arr->elements[i]);
 
-                // For all types including nested arrays, store the value/pointer in rax
-                emit("    mov rbx, [rsp + 8]"); // array pointer
+                emit("    mov rbx, [rsp + 8]"); 
                 emit("    mov qword [rbx + " + std::to_string(16 + i * 8) + "], rax");
             }
 
-            emit("    add rsp, 8"); // Remove type array pointer
-            emit("    pop rax");    // Array pointer in rax
+            emit("    add rsp, 8"); 
+            emit("    pop rax");    
         }
 
         void printArrayVariable(const std::string &varName)
         {
             int off = varTable[varName];
-            emit("    mov rax, " + slot(off)); // Load array pointer
+            emit("    mov rax, " + slot(off)); 
 
-            // Check for null array
             emitNullCheck("rax");
 
-            emit("    mov rbx, qword [rax]");     // Load array length
-            emit("    mov rcx, qword [rax + 8]"); // Load type array pointer
-            emit("    add rax, 16");              // Point to first element
+            emit("    mov rbx, qword [rax]");     
+            emit("    mov rcx, qword [rax + 8]"); 
+            emit("    add rax, 16");              
 
-            // Print opening bracket
             emit("    push rax");
             emit("    push rbx");
             emit("    push rcx");
@@ -894,18 +834,16 @@ namespace nasm
             emit("    pop rbx");
             emit("    pop rax");
 
-            // Loop through elements
             std::string loopLbl = newLabel("print_loop");
             std::string doneLbl = newLabel("print_done");
             std::string commaLbl = newLabel("print_comma");
 
-            emit("    mov r8, 0"); // Index counter
+            emit("    mov r8, 0"); 
 
             emit(loopLbl + ":");
             emit("    cmp r8, rbx");
             emit("    jge " + doneLbl);
 
-            // Print comma if not first element
             emit("    cmp r8, 0");
             emit("    je " + commaLbl);
 
@@ -925,35 +863,32 @@ namespace nasm
 
             emit(commaLbl + ":");
 
-            // Get type of current element
             emit("    push rax");
             emit("    push rbx");
             emit("    mov rbx, r8");
             emit("    imul rbx, 8");
             emit("    add rcx, rbx");
-            emit("    mov rdx, qword [rcx]"); // Type code
-            emit("    sub rcx, rbx");         // Restore rcx
+            emit("    mov rdx, qword [rcx]"); 
+            emit("    sub rcx, rbx");         
             emit("    pop rbx");
             emit("    pop rax");
 
-            // Get element value
             emit("    push rcx");
             emit("    push rdx");
             emit("    mov rcx, r8");
             emit("    imul rcx, 8");
             emit("    add rax, rcx");
-            emit("    mov r9, qword [rax]"); // Element value
-            emit("    sub rax, rcx");        // Restore rax
+            emit("    mov r9, qword [rax]"); 
+            emit("    sub rax, rcx");        
             emit("    pop rdx");
             emit("    pop rcx");
 
-            // Print element based on type
             std::string intLbl = newLabel("print_int");
             std::string floatLbl = newLabel("print_float");
             std::string stringLbl = newLabel("print_string");
             std::string boolLbl = newLabel("print_bool");
-            std::string arrayLbl = newLabel("print_array"); // Add this
-            std::string nullLbl = newLabel("print_null");   // Add this
+            std::string arrayLbl = newLabel("print_array"); 
+            std::string nullLbl = newLabel("print_null");   
             std::string nextLbl = newLabel("next_elem");
 
             emit("    cmp rdx, 0");
@@ -965,8 +900,8 @@ namespace nasm
             emit("    cmp rdx, 3");
             emit("    je " + boolLbl);
             emit("    cmp rdx, 4");
-            emit("    je " + arrayLbl); // Handle nested arrays
-            emit("    jmp " + intLbl);  // Default to int
+            emit("    je " + arrayLbl); 
+            emit("    jmp " + intLbl);  
 
             emit(intLbl + ":");
             emit("    push rax");
@@ -974,7 +909,6 @@ namespace nasm
             emit("    push rcx");
             emit("    push r8");
 
-            // Check if it's a null value
             emit("    mov rbx, " + std::to_string(NULL_VALUE));
             emit("    cmp r9, rbx");
             emit("    je " + nullLbl);
@@ -993,7 +927,6 @@ namespace nasm
             emit("    push rcx");
             emit("    push r8");
 
-            // Check if it's a null value
             emit("    mov rbx, " + std::to_string(NULL_VALUE));
             emit("    cmp r9, rbx");
             emit("    je " + nullLbl);
@@ -1012,12 +945,11 @@ namespace nasm
             emit("    push rcx");
             emit("    push r8");
 
-            // Check if it's a null value
             emit("    mov rbx, " + std::to_string(NULL_VALUE));
             emit("    cmp r9, rbx");
             emit("    je " + nullLbl);
 
-            emit("    mov rsi, r9"); // String pointer
+            emit("    mov rsi, r9"); 
             std::string strlenLbl = newLabel("strlen");
             emit("    xor rcx, rcx");
             emit(strlenLbl + "_loop:");
@@ -1042,7 +974,6 @@ namespace nasm
             emit("    push rcx");
             emit("    push r8");
 
-            // Check if it's a null value
             emit("    mov rbx, " + std::to_string(NULL_VALUE));
             emit("    cmp r9, rbx");
             emit("    je " + nullLbl);
@@ -1055,20 +986,16 @@ namespace nasm
             emit("    pop rax");
             emit("    jmp " + nextLbl);
 
-            // Add handler for nested arrays
             emit(arrayLbl + ":");
             emit("    push rax");
             emit("    push rbx");
             emit("    push rcx");
             emit("    push r8");
 
-            // Check if it's a null value
             emit("    mov rbx, " + std::to_string(NULL_VALUE));
             emit("    cmp r9, rbx");
             emit("    je " + nullLbl);
 
-            // Print nested array recursively
-            // Print nested array recursively
             printNestedArray("r9", 0);
             emit("    pop r8");
             emit("    pop rcx");
@@ -1076,7 +1003,6 @@ namespace nasm
             emit("    pop rax");
             emit("    jmp " + nextLbl);
 
-            // Add handler for null values
             emit(nullLbl + ":");
             emit("    push rax");
             emit("    push rbx");
@@ -1094,7 +1020,6 @@ namespace nasm
 
             emit(doneLbl + ":");
 
-            // Print closing bracket
             emit("    mov rax, 1");
             emit("    mov rdi, 1");
             emit("    mov rsi, close_bracket");
@@ -1104,23 +1029,22 @@ namespace nasm
 
         void printNestedArray(const std::string &arrayReg, int depth = 0)
         {
-            // Prevent infinite recursion with a reasonable depth limit
+
             if (depth > 10)
             {
                 emit("    mov rax, 1");
                 emit("    mov rdi, 1");
-                emit("    lea rsi, [rel null_str]"); // Print "null" for too-deep nesting
+                emit("    lea rsi, [rel null_str]"); 
                 emit("    mov rdx, 4");
                 emit("    syscall");
                 return;
             }
 
-            emit("    mov rax, " + arrayReg);     // Array pointer
-            emit("    mov rbx, qword [rax]");     // Load array length
-            emit("    mov rcx, qword [rax + 8]"); // Load type array pointer
-            emit("    add rax, 16");              // Point to first element
+            emit("    mov rax, " + arrayReg);     
+            emit("    mov rbx, qword [rax]");     
+            emit("    mov rcx, qword [rax + 8]"); 
+            emit("    add rax, 16");              
 
-            // Print opening bracket
             emit("    push rax");
             emit("    push rbx");
             emit("    push rcx");
@@ -1137,13 +1061,12 @@ namespace nasm
             std::string doneLbl = newLabel("nested_done");
             std::string commaLbl = newLabel("nested_comma");
 
-            emit("    mov r8, 0"); // Index counter
+            emit("    mov r8, 0"); 
 
             emit(loopLbl + ":");
             emit("    cmp r8, rbx");
             emit("    jge " + doneLbl);
 
-            // Print comma if not first element
             emit("    cmp r8, 0");
             emit("    je " + commaLbl);
 
@@ -1163,13 +1086,12 @@ namespace nasm
 
             emit(commaLbl + ":");
 
-            // Get type and value for each element
             emit("    push rax");
             emit("    push rbx");
             emit("    mov rbx, r8");
             emit("    imul rbx, 8");
             emit("    add rcx, rbx");
-            emit("    mov rdx, qword [rcx]"); // Type code
+            emit("    mov rdx, qword [rcx]"); 
             emit("    sub rcx, rbx");
             emit("    pop rbx");
             emit("    pop rax");
@@ -1179,12 +1101,11 @@ namespace nasm
             emit("    mov rcx, r8");
             emit("    imul rcx, 8");
             emit("    add rax, rcx");
-            emit("    mov r9, qword [rax]"); // Element value
+            emit("    mov r9, qword [rax]"); 
             emit("    sub rax, rcx");
             emit("    pop rdx");
             emit("    pop rcx");
 
-            // Print element based on type
             std::string intLbl = newLabel("nested_int");
             std::string floatLbl = newLabel("nested_float");
             std::string stringLbl = newLabel("nested_string");
@@ -1203,7 +1124,7 @@ namespace nasm
             emit("    je " + boolLbl);
             emit("    cmp rdx, 4");
             emit("    je " + arrayLbl);
-            emit("    jmp " + intLbl); // Default to int
+            emit("    jmp " + intLbl); 
 
             emit(intLbl + ":");
             emit("    push rax");
@@ -1211,7 +1132,6 @@ namespace nasm
             emit("    push rcx");
             emit("    push r8");
 
-            // Check if it's a null value
             emit("    mov rbx, " + std::to_string(NULL_VALUE));
             emit("    cmp r9, rbx");
             emit("    je " + nullLbl);
@@ -1230,7 +1150,6 @@ namespace nasm
             emit("    push rcx");
             emit("    push r8");
 
-            // Check if it's a null value
             emit("    mov rbx, " + std::to_string(NULL_VALUE));
             emit("    cmp r9, rbx");
             emit("    je " + nullLbl);
@@ -1249,7 +1168,6 @@ namespace nasm
             emit("    push rcx");
             emit("    push r8");
 
-            // Check if it's a null value
             emit("    mov rbx, " + std::to_string(NULL_VALUE));
             emit("    cmp r9, rbx");
             emit("    je " + nullLbl);
@@ -1279,7 +1197,6 @@ namespace nasm
             emit("    push rcx");
             emit("    push r8");
 
-            // Check if it's a null value
             emit("    mov rbx, " + std::to_string(NULL_VALUE));
             emit("    cmp r9, rbx");
             emit("    je " + nullLbl);
@@ -1298,12 +1215,10 @@ namespace nasm
             emit("    push rcx");
             emit("    push r8");
 
-            // Check if it's a null value
             emit("    mov rbx, " + std::to_string(NULL_VALUE));
             emit("    cmp r9, rbx");
             emit("    je " + nullLbl);
 
-            // Recursively print nested array with incremented depth
             printNestedArray("r9", depth + 1);
             emit("    pop r8");
             emit("    pop rcx");
@@ -1328,14 +1243,13 @@ namespace nasm
 
             emit(doneLbl + ":");
 
-            // Print closing bracket
             emit("    mov rax, 1");
             emit("    mov rdi, 1");
             emit("    mov rsi, close_bracket");
             emit("    mov rdx, 1");
             emit("    syscall");
         }
-        // First pass: walk function body to assign stack offsets for local variables
+
         void collectLocals(const StmtPtr &stmt, bool isTopLevel = false)
         {
             if (!stmt)
@@ -1354,7 +1268,6 @@ namespace nasm
                     varTable[v->name] = stackOffset;
                 }
 
-                // CHANGE: Determine if variable is nullable
                 bool isNullable = v->typeHint.empty() || v->typeHint.back() == '?';
                 varNullable[v->name] = isNullable;
 
@@ -1389,13 +1302,13 @@ namespace nasm
                     int off = varTable[v->name];
                     if (isNullable)
                     {
-                        // Initialize nullable variables to null
+
                         emit("    mov rax, " + std::to_string(NULL_VALUE));
                         emit("    mov " + slot(off) + ", rax");
                     }
                     else
                     {
-                        // Initialize non-nullable variables to zero
+
                         emit("    mov rax, 0");
                         emit("    mov " + slot(off) + ", rax");
                     }
@@ -1406,9 +1319,9 @@ namespace nasm
             {
                 if (!isTopLevel)
                 {
-                    // This is a nested function - defer its generation
+
                     deferredFunctions.push_back(f);
-                    // Don't recurse into the function body here
+
                     return;
                 }
             }
@@ -1428,37 +1341,31 @@ namespace nasm
             }
             else if (auto forStmt = std::dynamic_pointer_cast<ForStmt>(stmt))
             {
-                // The iterator variable will be handled during code generation
-                // Just collect locals from the body
+
                 collectLocals(forStmt->body, isTopLevel);
             }
         }
         void generate(StmtPtr program)
         {
-            // Clear any global state
+
             deferredFunctions.clear();
 
-            // --- Text section
             emit("section .text");
             emit("global _start");
             emit("_start:");
             emit("    call main");
 
-            // exit with main's return value
-            emit("    mov rdi, rax"); // exit code = main's return
-            emit("    mov rax, 60");  // syscall: exit
+            emit("    mov rdi, rax"); 
+            emit("    mov rax, 60");  
             emit("    syscall");
 
             genStmt(program);
 
-            // Emit error handlers at the end
             emitErrorHandlers();
 
-            // --- BSS for integer printing
             emit("section .bss");
             emit("num_buf: resb 32");
 
-            // --- Data section
             if (!dataSection.empty())
             {
                 emit("section .data");
@@ -1481,20 +1388,17 @@ namespace nasm
             {
                 functionReturnTypes[f->name] = f->returnType.empty() ? "int" : f->returnType;
 
-                // Save current state
                 std::unordered_map<std::string, int> savedVarTable = varTable;
                 std::unordered_map<std::string, std::string> savedVarTypes = varTypes;
                 int savedStackOffset = stackOffset;
                 auto savedDeferred = deferredFunctions;
 
-                // Reset per-function state
                 varTable.clear();
                 varTypes.clear();
                 stackOffset = 0;
                 deferredFunctions.clear();
 
-                // Add function parameters to varTable
-                int paramOffset = 16; // Start after saved rbp (8) and return address (8)
+                int paramOffset = 16; 
 
                 for (const auto &param : f->params)
                 {
@@ -1506,10 +1410,8 @@ namespace nasm
                     paramOffset += 8;
                 }
 
-                // Collect local variables (this will defer nested functions)
                 collectLocals(f->body, false);
 
-                // Emit function label and prologue
                 emit(f->name + ":");
                 emit("    push rbp");
                 emit("    mov rbp, rsp");
@@ -1521,10 +1423,8 @@ namespace nasm
                 if (totalLocal > 0)
                     emit("    sub rsp, " + std::to_string(totalLocal));
 
-                // Generate body code (skipping nested function declarations)
                 genStmtSkipNestedFunctions(f->body);
 
-                // Handle return logic
                 bool endsWithReturn = false;
                 if (auto blk = std::dynamic_pointer_cast<BlockStmt>(f->body))
                 {
@@ -1545,18 +1445,15 @@ namespace nasm
                         emit("    mov rax, 0");
                 }
 
-                // Epilogue
                 emit("    mov rsp, rbp");
                 emit("    pop rbp");
                 emit("    ret");
 
-                // Now generate all the nested functions that were deferred
                 for (auto &nestedFunc : deferredFunctions)
                 {
                     genStmt(nestedFunc);
                 }
 
-                // Restore outer function state
                 varTable = savedVarTable;
                 varTypes = savedVarTypes;
                 stackOffset = savedStackOffset;
@@ -1569,10 +1466,10 @@ namespace nasm
                     stackOffset -= 8;
                     varTable[v->name] = stackOffset;
                 }
-                // Add after existing type inference in VarDecl handling:
+
                 if (v->typeHint.find('[') != std::string::npos)
                 {
-                    // Parse array type
+
                     auto typeInfo = TypeInfo::parse(v->typeHint);
                     varTypeInfo[v->name] = typeInfo;
 
@@ -1582,7 +1479,6 @@ namespace nasm
                     }
                 }
 
-                // Determine if variable is nullable
                 bool isNullable = v->typeHint.empty() || v->typeHint.back() == '?';
                 varNullable[v->name] = isNullable;
 
@@ -1631,7 +1527,7 @@ namespace nasm
                         emit("    mov " + slot(off) + ", rax");
                     }
                 }
-                // After genExpr(v->initializer), add:
+
                 if (auto arrInit = std::dynamic_pointer_cast<ArrayExpr>(v->initializer))
                 {
                     for (int i = 0; i < static_cast<int>(arrInit->elements.size()); ++i)
@@ -1645,20 +1541,19 @@ namespace nasm
                     int off = varTable[v->name];
                     if (isNullable)
                     {
-                        // Initialize to null
+
                         emit("    mov rax, " + std::to_string(NULL_VALUE));
                         emit("    mov " + slot(off) + ", rax");
                     }
                     else
                     {
-                        // Initialize to zero
+
                         emit("    mov rax, 0");
                         emit("    mov " + slot(off) + ", rax");
                     }
                 }
             }
 
-            // UPDATED print handling in ExprStmt
             else if (auto e = std::dynamic_pointer_cast<ExprStmt>(stmt))
             {
                 if (auto call = std::dynamic_pointer_cast<CallExpr>(e->expr))
@@ -1695,11 +1590,11 @@ namespace nasm
                             }
                             else if (auto idArg = std::dynamic_pointer_cast<IdentifierExpr>(arg))
                             {
-                                // Check if this is an array variable
+
                                 std::string argType = getExprType(arg);
                                 if (argType.find("array") == 0)
                                 {
-                                    // Print entire array
+
                                     printArrayVariable(idArg->name);
                                     return;
                                 }
@@ -1723,7 +1618,6 @@ namespace nasm
                                 }
                             }
 
-                            // Use the existing array-aware print handler for all other cases
                             handleArrayElementPrint(arg);
                             return;
                         }
@@ -1774,17 +1668,13 @@ namespace nasm
 
                 emit(startLbl + ":");
 
-                // Evaluate condition, result in rax
                 genExpr(w->condition);
 
-                // Compare with 0, jump to end if false
                 emit("    cmp rax, 0");
                 emit("    je " + endLbl);
 
-                // Generate loop body
                 genStmt(w->body);
 
-                // Jump back to start
                 emit("    jmp " + startLbl);
 
                 emit(endLbl + ":");
@@ -1795,96 +1685,78 @@ namespace nasm
                 std::string startLbl = newLabel("Ltimes_start");
                 std::string endLbl = newLabel("Ltimes_end");
 
-                // Determine count type and generate expression.
-                // If float, convert to int (truncate toward zero).
                 std::string countType = getExprType(t->count);
                 if (countType == "float")
                 {
-                    genExpr(t->count);               // expects result in xmm0
-                    emit("    cvttsd2si rax, xmm0"); // rax <- (int) xmm0
+                    genExpr(t->count);               
+                    emit("    cvttsd2si rax, xmm0"); 
                 }
                 else
                 {
-                    genExpr(t->count); // expects result in rax for ints
+                    genExpr(t->count); 
                 }
 
-                // Allocate 16 bytes on the stack for the loop counter (keeps 16-byte alignment)
                 emit("    sub rsp, 16");
-                emit("    mov qword [rsp], rax"); // store counter at [rsp]
+                emit("    mov qword [rsp], rax"); 
 
                 emit(startLbl + ":");
                 emit("    mov rax, qword [rsp]");
                 emit("    cmp rax, 0");
-                emit("    jle " + endLbl); // exit if <= 0
+                emit("    jle " + endLbl); 
 
-                // Loop body
                 genStmt(t->body);
 
-                // decrement counter and loop
                 emit("    dec qword [rsp]");
                 emit("    jmp " + startLbl);
 
                 emit(endLbl + ":");
-                emit("    add rsp, 16"); // restore stack
+                emit("    add rsp, 16"); 
             }
-
-            // Replace the ForStmt handling in genStmt method with this corrected version:
 
             else if (auto forStmt = std::dynamic_pointer_cast<ForStmt>(stmt))
             {
                 std::string startLbl = newLabel("for_start");
                 std::string endLbl = newLabel("for_end");
 
-                // Generate the iterable expression (should be an array)
                 genExpr(forStmt->iterable);
 
-                // Check for null array
                 emitNullCheck("rax");
 
-                // Allocate space for loop control variables on stack (16-byte aligned)
-                emit("    sub rsp, 16");          // array_ptr, array_length
-                emit("    mov [rsp], rax");       // Store array pointer
-                emit("    mov rbx, qword [rax]"); // Load array length
-                emit("    mov [rsp+8], rbx");     // Store array length
+                emit("    sub rsp, 16");          
+                emit("    mov [rsp], rax");       
+                emit("    mov rbx, qword [rax]"); 
+                emit("    mov [rsp+8], rbx");     
 
-                // Add iterator variable to scope - this will hold the INDEX
                 stackOffset -= 8;
                 int iteratorOffset = stackOffset;
                 varTable[forStmt->iterator] = iteratorOffset;
-                varTypes[forStmt->iterator] = "int"; // Iterator is always an integer index
+                varTypes[forStmt->iterator] = "int"; 
 
-                // Initialize iterator to 0
                 emit("    mov qword " + slot(iteratorOffset) + ", 0");
 
                 emit(startLbl + ":");
-                // Load current state
-                emit("    mov rax, [rsp]");                   // Array pointer
-                emit("    mov rbx, [rsp+8]");                 // Array length
-                emit("    mov rcx, " + slot(iteratorOffset)); // Current index
 
-                // Check if we've reached the end
+                emit("    mov rax, [rsp]");                   
+                emit("    mov rbx, [rsp+8]");                 
+                emit("    mov rcx, " + slot(iteratorOffset)); 
+
                 emit("    cmp rcx, rbx");
                 emit("    jge " + endLbl);
 
-                // Generate loop body (iterator variable contains the current index)
                 genStmt(forStmt->body);
 
-                // Increment index
                 emit("    inc qword " + slot(iteratorOffset));
                 emit("    jmp " + startLbl);
 
                 emit(endLbl + ":");
 
-                // Clean up
-                emit("    add rsp, 16");           // Remove loop control variables
-                stackOffset += 8;                  // Restore stack offset for iterator
-                varTable.erase(forStmt->iterator); // Remove iterator from scope
+                emit("    add rsp, 16");           
+                stackOffset += 8;                  
+                varTable.erase(forStmt->iterator); 
                 varTypes.erase(forStmt->iterator);
             }
             else if (auto p = std::dynamic_pointer_cast<PrintStmt>(stmt))
             {
-                // Generate code to print an expression. We won't rely on an external
-                // r12 accumulator here; emitPrintRax preserves callee-saved registers.
 
                 if (auto lit = std::dynamic_pointer_cast<LiteralExpr>(p->expr))
                 {
@@ -1902,14 +1774,14 @@ namespace nasm
                     }
                     else
                     {
-                        genExpr(p->expr); // compute rax
-                        emitPrintRax();   // convert + syscall
+                        genExpr(p->expr); 
+                        emitPrintRax();   
                     }
                 }
                 else
                 {
-                    genExpr(p->expr); // compute rax
-                    emitPrintRax();   // convert + syscall
+                    genExpr(p->expr); 
+                    emitPrintRax();   
                 }
             }
         }
@@ -1945,24 +1817,21 @@ namespace nasm
                     throw std::runtime_error("Unknown variable: " + id->name);
                 int off = varTable[id->name];
 
-                // Check if this is a float variable
                 auto it = varTypes.find(id->name);
                 if (it != varTypes.end() && it->second == "float")
                 {
                     emit("    movsd xmm0, " + slot(off));
-                    emit("    movq rax, xmm0"); // Store bit pattern in rax
+                    emit("    movq rax, xmm0"); 
                 }
                 else
                 {
                     emit("    mov rax, " + slot(off));
                 }
             }
-            
-            // REPLACE the entire binary expression handling in genExpr with this corrected version:
 
             else if (auto bin = std::dynamic_pointer_cast<BinaryExpr>(expr))
             {
-                // Handle assignment operators
+
                 if (bin->op == "=" || bin->op == "+=" || bin->op == "-=" ||
                     bin->op == "*=" || bin->op == "/=" || bin->op == "%=" ||
                     bin->op == "&=" || bin->op == "|=" || bin->op == "^=" ||
@@ -1976,7 +1845,7 @@ namespace nasm
 
                     if (bin->op == "=")
                     {
-                        // Check if assigning null to non-nullable variable
+
                         if (auto rhsLit = std::dynamic_pointer_cast<LiteralExpr>(bin->rhs))
                         {
                             if (rhsLit->type == "null")
@@ -2010,14 +1879,13 @@ namespace nasm
                     }
                     else
                     {
-                        // Compound assignment: load LHS, perform operation, store back
-                        genExpr(bin->lhs); // Load current value
+
+                        genExpr(bin->lhs); 
                         emit("    push rax");
-                        genExpr(bin->rhs); // Load RHS
+                        genExpr(bin->rhs); 
                         emit("    mov rbx, rax");
                         emit("    pop rax");
 
-                        // Perform the operation
                         if (bin->op == "+=")
                             emit("    add rax, rbx");
                         else if (bin->op == "-=")
@@ -2033,7 +1901,7 @@ namespace nasm
                         {
                             emit("    cqo");
                             emit("    idiv rbx");
-                            emit("    mov rax, rdx"); // remainder in rdx
+                            emit("    mov rax, rdx"); 
                         }
                         else if (bin->op == "&=")
                             emit("    and rax, rbx");
@@ -2049,14 +1917,13 @@ namespace nasm
                         else if (bin->op == ">>=")
                         {
                             emit("    mov rcx, rbx");
-                            emit("    sar rax, cl"); // arithmetic right shift
+                            emit("    sar rax, cl"); 
                         }
 
-                        // Store result back
                         emit("    mov " + slot(off) + ", rax");
                     }
                 }
-                // Handle logical operators with short-circuiting
+
                 else if (bin->op == "&&")
                 {
                     std::string falseLbl = newLabel("and_false");
@@ -2095,13 +1962,12 @@ namespace nasm
                     emit("    mov rax, 1");
                     emit(doneLbl + ":");
                 }
-                // Handle comparison operators FIRST (before arithmetic)
+
                 else if (bin->op == "==" || bin->op == "!=")
                 {
-                    // Check if we're dealing with float operations
+
                     bool leftIsFloat = false, rightIsFloat = false;
 
-                    // Check left operand
                     if (auto leftId = std::dynamic_pointer_cast<IdentifierExpr>(bin->lhs))
                     {
                         auto it = varTypes.find(leftId->name);
@@ -2112,7 +1978,6 @@ namespace nasm
                         leftIsFloat = (leftLit->type == "float");
                     }
 
-                    // Check right operand
                     if (auto rightId = std::dynamic_pointer_cast<IdentifierExpr>(bin->rhs))
                     {
                         auto it = varTypes.find(rightId->name);
@@ -2123,10 +1988,9 @@ namespace nasm
                         rightIsFloat = (rightLit->type == "float");
                     }
 
-                    // Handle float comparisons properly
                     if (leftIsFloat || rightIsFloat)
                     {
-                        // Float comparison using SSE instructions
+
                         genExpr(bin->lhs);
                         if (!leftIsFloat)
                         {
@@ -2152,30 +2016,28 @@ namespace nasm
                         emit("    movsd xmm0, [rsp]");
                         emit("    add rsp, 8");
 
-                        // Compare floats
                         emit("    comisd xmm0, xmm1");
                         if (bin->op == "==")
                         {
                             emit("    sete al");
                             emit("    movzx rax, al");
                         }
-                        else // !=
+                        else 
                         {
                             emit("    setne al");
                             emit("    movzx rax, al");
                         }
                     }
-                    // Handle string comparisons properly
+
                     else if (isStringComparison(bin->lhs, bin->rhs))
                     {
-                        // String content comparison
-                        genExpr(bin->lhs); // first string address in rax
-                        emit("    push rax");
-                        genExpr(bin->rhs);        // second string address in rax
-                        emit("    mov rsi, rax"); // second string in rsi
-                        emit("    pop rdi");      // first string in rdi
 
-                        // Call string comparison routine
+                        genExpr(bin->lhs); 
+                        emit("    push rax");
+                        genExpr(bin->rhs);        
+                        emit("    mov rsi, rax"); 
+                        emit("    pop rdi");      
+
                         std::string cmpLbl = newLabel("strcmp");
                         std::string eqLbl = cmpLbl + "_eq";
                         std::string neLbl = cmpLbl + "_ne";
@@ -2186,7 +2048,7 @@ namespace nasm
                         emit("    mov bl, [rsi]");
                         emit("    cmp al, bl");
                         emit("    jne " + neLbl);
-                        emit("    test al, al"); // check for null terminator
+                        emit("    test al, al"); 
                         emit("    je " + eqLbl);
                         emit("    inc rdi");
                         emit("    inc rsi");
@@ -2194,22 +2056,22 @@ namespace nasm
 
                         emit(eqLbl + ":");
                         if (bin->op == "==")
-                            emit("    mov rax, 1"); // strings are equal
+                            emit("    mov rax, 1"); 
                         else
-                            emit("    mov rax, 0"); // strings are equal, but we want !=
+                            emit("    mov rax, 0"); 
                         emit("    jmp " + doneLbl);
 
                         emit(neLbl + ":");
                         if (bin->op == "==")
-                            emit("    mov rax, 0"); // strings are not equal
+                            emit("    mov rax, 0"); 
                         else
-                            emit("    mov rax, 1"); // strings are not equal, and we want !=
+                            emit("    mov rax, 1"); 
 
                         emit(doneLbl + ":");
                     }
                     else
                     {
-                        // Regular integer comparison
+
                         genExpr(bin->lhs);
                         emit("    push rax");
                         genExpr(bin->rhs);
@@ -2222,7 +2084,7 @@ namespace nasm
                             emit("    sete al");
                             emit("    movzx rax, al");
                         }
-                        else // !=
+                        else 
                         {
                             emit("    setne al");
                             emit("    movzx rax, al");
@@ -2231,10 +2093,9 @@ namespace nasm
                 }
                 else if (bin->op == "<" || bin->op == "<=" || bin->op == ">" || bin->op == ">=")
                 {
-                    // Check if we're dealing with float operations
+
                     bool leftIsFloat = false, rightIsFloat = false;
 
-                    // Check left operand
                     if (auto leftId = std::dynamic_pointer_cast<IdentifierExpr>(bin->lhs))
                     {
                         auto it = varTypes.find(leftId->name);
@@ -2245,7 +2106,6 @@ namespace nasm
                         leftIsFloat = (leftLit->type == "float");
                     }
 
-                    // Check right operand
                     if (auto rightId = std::dynamic_pointer_cast<IdentifierExpr>(bin->rhs))
                     {
                         auto it = varTypes.find(rightId->name);
@@ -2256,10 +2116,9 @@ namespace nasm
                         rightIsFloat = (rightLit->type == "float");
                     }
 
-                    // Handle float comparisons for relational operators
                     if (leftIsFloat || rightIsFloat)
                     {
-                        // Float comparison using SSE instructions
+
                         genExpr(bin->lhs);
                         if (!leftIsFloat)
                         {
@@ -2285,7 +2144,6 @@ namespace nasm
                         emit("    movsd xmm0, [rsp]");
                         emit("    add rsp, 8");
 
-                        // Compare floats
                         emit("    comisd xmm0, xmm1");
                         if (bin->op == "<")
                         {
@@ -2302,7 +2160,7 @@ namespace nasm
                             emit("    seta al");
                             emit("    movzx rax, al");
                         }
-                        else // >=
+                        else 
                         {
                             emit("    setae al");
                             emit("    movzx rax, al");
@@ -2310,7 +2168,7 @@ namespace nasm
                     }
                     else
                     {
-                        // Regular integer comparison
+
                         genExpr(bin->lhs);
                         emit("    push rax");
                         genExpr(bin->rhs);
@@ -2333,23 +2191,19 @@ namespace nasm
                             emit("    setg al");
                             emit("    movzx rax, al");
                         }
-                        else // >=
+                        else 
                         {
                             emit("    setge al");
                             emit("    movzx rax, al");
                         }
                     }
                 }
-                // Handle arithmetic and other operations
-                // In your BinaryExpr handling in genExpr, replace the type detection logic with this:
 
-                // Handle arithmetic and other operations
                 else
                 {
-                    // Check if we're dealing with float operations
+
                     bool leftIsFloat = false, rightIsFloat = false;
 
-                    // Check left operand
                     if (auto leftId = std::dynamic_pointer_cast<IdentifierExpr>(bin->lhs))
                     {
                         auto it = varTypes.find(leftId->name);
@@ -2361,12 +2215,11 @@ namespace nasm
                     }
                     else if (auto leftIdx = std::dynamic_pointer_cast<IndexExpr>(bin->lhs))
                     {
-                        // ADDED: Check if IndexExpr returns float
+
                         std::string idxType = getExprType(leftIdx);
                         leftIsFloat = (idxType == "float");
                     }
 
-                    // Check right operand
                     if (auto rightId = std::dynamic_pointer_cast<IdentifierExpr>(bin->rhs))
                     {
                         auto it = varTypes.find(rightId->name);
@@ -2378,18 +2231,18 @@ namespace nasm
                     }
                     else if (auto rightIdx = std::dynamic_pointer_cast<IndexExpr>(bin->rhs))
                     {
-                        // ADDED: Check if IndexExpr returns float
+
                         std::string idxType = getExprType(rightIdx);
                         rightIsFloat = (idxType == "float");
                     }
 
                     if (leftIsFloat || rightIsFloat)
                     {
-                        // Floating-point arithmetic
+
                         genExpr(bin->lhs);
                         if (!leftIsFloat)
                         {
-                            // Convert integer to float
+
                             emit("    cvtsi2sd xmm0, rax");
                         }
                         else
@@ -2402,7 +2255,7 @@ namespace nasm
                         genExpr(bin->rhs);
                         if (!rightIsFloat)
                         {
-                            // Convert integer to float
+
                             emit("    cvtsi2sd xmm1, rax");
                         }
                         else
@@ -2426,7 +2279,7 @@ namespace nasm
                     }
                     else
                     {
-                        // Integer operations (unchanged)
+
                         genExpr(bin->lhs);
                         emit("    push rax");
                         genExpr(bin->rhs);
@@ -2444,13 +2297,13 @@ namespace nasm
                             emit("    cqo");
                             emit("    idiv rbx");
                         }
-                        else if (bin->op == "%") // Modulo operator
+                        else if (bin->op == "%") 
                         {
                             emit("    cqo");
                             emit("    idiv rbx");
-                            emit("    mov rax, rdx"); // remainder in rdx
+                            emit("    mov rax, rdx"); 
                         }
-                        // Bitwise operators
+
                         else if (bin->op == "&")
                             emit("    and rax, rbx");
                         else if (bin->op == "|")
@@ -2465,7 +2318,7 @@ namespace nasm
                         else if (bin->op == ">>")
                         {
                             emit("    mov rcx, rbx");
-                            emit("    sar rax, cl"); // arithmetic right shift
+                            emit("    sar rax, cl"); 
                         }
                     }
                 }
@@ -2475,16 +2328,16 @@ namespace nasm
             {
                 genExpr(un->rhs);
                 if (un->op == "-")
-                    emit("    neg rax"); // More efficient than imul with -1
+                    emit("    neg rax"); 
                 else if (un->op == "!")
                 {
                     emit("    cmp rax, 0");
                     emit("    sete al");
                     emit("    movzx rax, al");
                 }
-                else if (un->op == "~") // Bitwise NOT
+                else if (un->op == "~") 
                     emit("    not rax");
-                else if (un->op == "++") // Pre-increment (if supported)
+                else if (un->op == "++") 
                 {
                     if (auto id = std::dynamic_pointer_cast<IdentifierExpr>(un->rhs))
                     {
@@ -2493,7 +2346,7 @@ namespace nasm
                         emit("    mov " + slot(off) + ", rax");
                     }
                 }
-                else if (un->op == "--") // Pre-decrement (if supported)
+                else if (un->op == "--") 
                 {
                     if (auto id = std::dynamic_pointer_cast<IdentifierExpr>(un->rhs))
                     {
@@ -2512,49 +2365,44 @@ namespace nasm
                 std::string elseType = getExprType(ifExpr->elseBranch);
                 bool resultIsFloat = (thenType == "float" || elseType == "float");
 
-                // Generate condition
                 genExpr(ifExpr->condition);
                 emit("    cmp rax, 0");
                 emit("    je " + elseLbl);
 
-                // Generate then expression
                 genExpr(ifExpr->thenBranch);
                 if (resultIsFloat && thenType != "float")
                 {
-                    // Convert int to float
+
                     emit("    cvtsi2sd xmm0, rax");
                     emit("    movq rax, xmm0");
                 }
                 emit("    jmp " + doneLbl);
 
-                // Generate else expression
                 emit(elseLbl + ":");
                 genExpr(ifExpr->elseBranch);
                 if (resultIsFloat && elseType != "float")
                 {
-                    // Convert int to float
+
                     emit("    cvtsi2sd xmm0, rax");
                     emit("    movq rax, xmm0");
                 }
 
                 emit(doneLbl + ":");
-                // Result is now in rax (with proper type conversion)
+
             }
             else if (auto call = std::dynamic_pointer_cast<CallExpr>(expr))
             {
-                // Generate arguments and push them on stack (reverse order)
+
                 for (int i = call->args.size() - 1; i >= 0; i--)
                 {
                     genExpr(call->args[i]);
                     emit("    push rax");
                 }
 
-                // Call the function
                 if (auto callee = std::dynamic_pointer_cast<IdentifierExpr>(call->callee))
                 {
                     emit("    call " + callee->name);
 
-                    // Clean up arguments from stack
                     if (call->args.size() > 0)
                     {
                         emit("    add rsp, " + std::to_string(call->args.size() * 8));
@@ -2565,75 +2413,65 @@ namespace nasm
                     throw std::runtime_error("Only direct function calls supported");
                 }
             }
-            // In genExpr method, add after existing cases:
 
             else if (auto arr = std::dynamic_pointer_cast<ArrayExpr>(expr))
             {
                 handleArrayExpr(arr);
             }
 
-            // In genExpr method, replace the IndexExpr case with this:
             else if (auto idx = std::dynamic_pointer_cast<IndexExpr>(expr))
             {
-                genExpr(idx->array); // Array pointer in rax
+                genExpr(idx->array); 
 
-                // Check for null array
                 emitNullCheck("rax");
 
-                emit("    push rax");     // Save array pointer
-                genExpr(idx->index);      // Index in rax
-                emit("    mov rbx, rax"); // Index in rbx
-                emit("    pop rax");      // Array pointer back in rax
+                emit("    push rax");     
+                genExpr(idx->index);      
+                emit("    mov rbx, rax"); 
+                emit("    pop rax");      
 
-                // Bounds check
                 emitArrayBoundsCheck("rax", "rbx");
 
-                // Get type information
-                emit("    push rax");                 // Save array pointer
-                emit("    push rbx");                 // Save index
-                emit("    mov rcx, qword [rax + 8]"); // Load type array pointer
-                emit("    imul rbx, 8");              // Index * 8 for type lookup
+                emit("    push rax");                 
+                emit("    push rbx");                 
+                emit("    mov rcx, qword [rax + 8]"); 
+                emit("    imul rbx, 8");              
                 emit("    add rcx, rbx");
-                emit("    mov rdx, qword [rcx]"); // Load type code
-                emit("    pop rbx");              // Restore index
-                emit("    pop rax");              // Restore array pointer
+                emit("    mov rdx, qword [rcx]"); 
+                emit("    pop rbx");              
+                emit("    pop rax");              
 
-                // Calculate element offset: 16 + (index * 8)
                 emit("    imul rbx, 8");
-                emit("    add rbx, 16"); // Skip length and type pointer
+                emit("    add rbx, 16"); 
                 emit("    add rax, rbx");
-                emit("    mov rax, qword [rax]"); // Load element value
+                emit("    mov rax, qword [rax]"); 
 
-                // For nested arrays (type code 4), rax now contains pointer to nested array
-                // This allows chaining like a[0][1]
             }
 
             else if (auto assign = std::dynamic_pointer_cast<ArrayAssignExpr>(expr))
             {
-                genExpr(assign->array); // Array pointer in rax
+                genExpr(assign->array); 
                 emitNullCheck("rax");
 
-                emit("    push rax");     // Save array pointer
-                genExpr(assign->index);   // Index in rax
-                emit("    mov rbx, rax"); // Index in rbx
-                emit("    pop rax");      // Array pointer back in rax
+                emit("    push rax");     
+                genExpr(assign->index);   
+                emit("    mov rbx, rax"); 
+                emit("    pop rax");      
 
-                // Bounds check
                 emitArrayBoundsCheck("rax", "rbx");
 
-                emit("    push rax");     // Save array pointer
-                emit("    push rbx");     // Save index
-                genExpr(assign->value);   // Value in rax
-                emit("    mov rcx, rax"); // Value in rcx
-                emit("    pop rbx");      // Index back in rbx
-                emit("    pop rax");      // Array pointer back in rax
+                emit("    push rax");     
+                emit("    push rbx");     
+                genExpr(assign->value);   
+                emit("    mov rcx, rax"); 
+                emit("    pop rbx");      
+                emit("    pop rax");      
 
-                // Calculate offset and store
                 emit("    imul rbx, 8");
                 emit("    add rbx, 8");
                 emit("    add rax, rbx");
-                emit("    mov qword [rax], rcx"); // Store value
-                emit("    mov rax, rcx");         // Return stored value
+                emit("    mov qword [rax], rcx"); 
+                emit("    mov rax, rcx");         
             }
         }
     };

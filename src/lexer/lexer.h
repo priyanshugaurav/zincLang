@@ -49,7 +49,7 @@ enum class TokenType {
 
 struct Token {
     TokenType type;
-    std::string value; // the raw lexeme (if applicable)
+    std::string value;
     int line = 0;
     int col = 0;
 };

@@ -14,29 +14,28 @@ using ASTNodePtr = std::shared_ptr<ASTNode>;
 using StmtPtr = std::shared_ptr<Statement>;
 using ExprPtr = std::shared_ptr<Expression>;
 
-// ---------------------------
+
 // Base AST Node
-// ---------------------------
+
 struct ASTNode {
     virtual ~ASTNode() = default;
 };
 
-// ---------------------------
+
 // Expressions
-// ---------------------------
+
 struct Expression : ASTNode {};
 
+
 // Literal expressions: int, float, bool, string
-// Literal expressions: int, float, bool, string
+
 struct LiteralExpr : Expression {
-    std::string value;   // raw lexeme
+    std::string value;  
     std::string type;    // "int", "float", "bool", "string"
 
-    // Manual constructor (already exists)
     LiteralExpr(const std::string &val, const std::string &t) 
         : value(val), type(t) {}
 
-    // New auto-detect constructor
     LiteralExpr(const std::string &val) : value(val)
     {
         if (std::regex_match(val, std::regex(R"(\d+)"))) {
@@ -54,12 +53,14 @@ struct LiteralExpr : Expression {
 
 
 // Identifier expression
+
 struct IdentifierExpr : Expression {
     std::string name;
     IdentifierExpr(const std::string &n) : name(n) {}
 };
 
 // Unary expression: !, -
+
 struct UnaryExpr : Expression {
     std::string op;   // operator
     ExprPtr rhs;
@@ -67,6 +68,7 @@ struct UnaryExpr : Expression {
 };
 
 // Binary expression: +, -, *, /, %, &&, ||, <, <=, >, >=, ==, !=
+
 struct BinaryExpr : Expression {
     ExprPtr lhs;
     std::string op;
@@ -75,13 +77,15 @@ struct BinaryExpr : Expression {
 };
 
 // Function call: foo(a, b)
+
 struct CallExpr : Expression {
-    ExprPtr callee;                // IdentifierExpr usually
+    ExprPtr callee;                
     std::vector<ExprPtr> args;
     CallExpr(ExprPtr c, std::vector<ExprPtr> a) : callee(c), args(std::move(a)) {}
 };
 
 // Array literal: [1,2,3]
+
 struct ArrayExpr : Expression {
     std::vector<ExprPtr> elements;
     ArrayExpr(std::vector<ExprPtr> elems) : elements(std::move(elems)) {}
@@ -90,15 +94,16 @@ struct ArrayExpr : Expression {
 
 
 // Index expression: arr[0]
+
 struct IndexExpr : Expression {
     ExprPtr array;
     ExprPtr index;
     IndexExpr(ExprPtr arr, ExprPtr idx) : array(arr), index(idx) {}
 };
 
-// ---------------------------
+
 // Statements
-// ---------------------------
+
 struct Statement : ASTNode {};
 
 // Variable declaration: let/var x = expr
@@ -226,6 +231,7 @@ struct TypeInfo {
         }
         
         // Parse array dimensions
+
         size_t bracketPos = workStr.find('[');
         if (bracketPos != std::string::npos) {
             type->baseType = "array";
@@ -241,7 +247,7 @@ struct TypeInfo {
             while (iter != end) {
                 std::string dimMatch = (*iter)[1].str();
                 if (dimMatch.empty()) {
-                    type->dimensions.push_back(-1); // dynamic size
+                    type->dimensions.push_back(-1); 
                 } else {
                     type->dimensions.push_back(std::stoi(dimMatch));
                 }
