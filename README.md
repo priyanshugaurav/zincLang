@@ -10,7 +10,8 @@ It’s designed to be **lightweight, minimal, and fun to explore**, while giving
 - 🔁 Loops (`for`, `while`, `times`)  
 - 🔀 Conditionals (`if`, `else`)  
 - 🧩 Functions and scoping  
-- 🔢 Basic types: integers, floats, strings  
+- 🔢 Basic types: integers, floats, strings , bools
+- 🔢 derived types: Array
 - 🖨️ Built-in `print` function  
 - 🛠️ NASM x86-64 code generation (experimental)  
 
@@ -20,7 +21,7 @@ It’s designed to be **lightweight, minimal, and fun to explore**, while giving
 
 ### 1. Clone the repo
 ```bash
-git clone https://github.com/your-username/zincLang.git
+git clone https://github.com/priyanshugaurav/zincLang.git
 cd zincLang
 ```
 ### 2. Build
@@ -31,7 +32,6 @@ make
 ```
 ### 3. Run a program
 ```bash
-Copy code
 ./zinc ../examples/hello.zn
 ```
 ### 📂 Project Structure
@@ -87,6 +87,6 @@ This includes:
 
 ---
 
-# 🤝 Contributing
+### 🤝 Contributing
 Pull requests are welcome!
 For major changes, please open an issue first to discuss what you’d like to change.
